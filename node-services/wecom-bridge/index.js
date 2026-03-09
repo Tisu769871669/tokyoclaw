@@ -13,6 +13,7 @@ const CRM = process.env.PERSONAL_CRM_BASE_URL || 'http://127.0.0.1:9030';
 const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL || 'http://127.0.0.1:8080/v1';
 const OPENCLAW_API_KEY = process.env.OPENCLAW_API_KEY || '';
 const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL || 'openclaw';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://127.0.0.1:9060';
 
 function sha1(s) {
   return crypto.createHash('sha1').update(s).digest('hex');
@@ -184,6 +185,10 @@ async function handleCmd(content) {
     return '已触发 poll，稍后发 leads 查看';
   }
 
+  if (low === 'dashboard') {
+    return `管理看板地址:\n${DASHBOARD_URL}`;
+  }
+
   if (low === 'leads') {
     const r = await axios.get(`${CRM}/leads`, { timeout: 8000 });
     const top = (Array.isArray(r.data) ? r.data : []).slice(0, 3);
@@ -295,6 +300,7 @@ async function handleCmd(content) {
     '命令说明:',
     'status  查看 personal-crm 服务状态',
     'poll  立即触发一次收件轮询',
+    'dashboard  查看管理看板地址',
     'leads  查看最近 3 条线索及分析',
     'draft <id>  查看该线索的 AI 分析和回复草稿',
     'reanalyze <id>  重新调用 AI 分析该线索',
@@ -309,7 +315,7 @@ function isCommand(content) {
   const t = (content || '').trim();
   if (!t) return false;
   const low = t.toLowerCase();
-  if (low === 'status' || low === 'poll' || low === 'leads') return true;
+  if (low === 'status' || low === 'poll' || low === 'leads' || low === 'dashboard') return true;
   if (/^draft\s+\d+$/i.test(t)) return true;
   if (/^reanalyze\s+\d+$/i.test(t)) return true;
   if (/^approve\s+\d+$/i.test(t)) return true;
@@ -327,6 +333,7 @@ function normalizeCommand(content) {
   if (/查看.*最近.*邮件/.test(t)) return 'leads';
   if (/最新.*邮件/.test(t)) return 'leads';
   if (/查看.*邮件/.test(t)) return 'leads';
+  if (/看板|dashboard|仪表盘/.test(t)) return 'dashboard';
 
   return t;
 }

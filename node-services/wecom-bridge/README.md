@@ -15,10 +15,11 @@ Endpoints:
 - `POST /notify/text` (generic internal text notify)
 
 Extra env for chat fallback:
+- `DASHBOARD_URL` (dashboard link returned by `dashboard` command)
 - `OPENCLAW_BASE_URL` (default `http://127.0.0.1:8080/v1`)
 - `OPENCLAW_API_KEY` (optional, set if gateway requires bearer token)
 - `OPENCLAW_MODEL` (default `openclaw`)
 
 Behavior:
-- Command text (`status/poll/leads/approve/reply/reject`) -> handled as control command
+- Command text (`status/poll/dashboard/leads/approve/reply/reject`) -> handled as control command
 - Other text -> forwarded to OpenClaw chat API and reply back to WeCom
