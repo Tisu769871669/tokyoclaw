@@ -14,6 +14,7 @@ const OPENCLAW_BASE_URL = process.env.OPENCLAW_BASE_URL || 'http://127.0.0.1:808
 const OPENCLAW_API_KEY = process.env.OPENCLAW_API_KEY || '';
 const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL || 'openclaw';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://127.0.0.1:9060';
+const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 0);
 
 function sha1(s) {
   return crypto.createHash('sha1').update(s).digest('hex');
@@ -410,7 +411,7 @@ async function chatWithOpenClaw(userText) {
       model: OPENCLAW_MODEL,
       messages: [{ role: 'user', content: userText }]
     },
-    { headers, timeout: 60000 }
+    { headers, timeout: AI_TIMEOUT_MS }
   );
 
   const text = r?.data?.choices?.[0]?.message?.content;
@@ -454,7 +455,7 @@ async function detectToolIntent(userText) {
         { role: 'user', content: userText }
       ]
     },
-    { headers, timeout: 30000 }
+    { headers, timeout: AI_TIMEOUT_MS }
   );
 
   const raw = String(resp.data?.choices?.[0]?.message?.content || '').trim();

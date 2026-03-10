@@ -19,6 +19,7 @@ Extra env for chat fallback:
 - `OPENCLAW_BASE_URL` (default `http://127.0.0.1:8080/v1`)
 - `OPENCLAW_API_KEY` (optional, set if gateway requires bearer token)
 - `OPENCLAW_MODEL` (default `openclaw`)
+- `AI_TIMEOUT_MS` (`0` means no timeout for AI/tool-routing requests)
 
 Behavior:
 - Command text (`status/poll/dashboard/leads/approve/reply/reject`) -> handled as control command
