@@ -158,6 +158,25 @@ function compactText(text, limit = 220) {
   return String(text || '').replace(/\s+/g, ' ').trim().slice(0, limit) || '无';
 }
 
+function shouldFlushChunk(text) {
+  const value = String(text || '');
+  if (!value.trim()) return false;
+  if (value.length >= 140) return true;
+  return /[。！？.!?\n]$/.test(value);
+}
+
+function extractDelta(payload) {
+  const delta = payload?.choices?.[0]?.delta;
+  if (!delta) return '';
+  if (typeof delta.content === 'string') return delta.content;
+  if (Array.isArray(delta.content)) {
+    return delta.content
+      .map(item => (typeof item?.text === 'string' ? item.text : ''))
+      .join('');
+  }
+  return '';
+}
+
 function categoryLabel(category) {
   const key = String(category || 'general').toLowerCase();
   const labels = {
@@ -362,6 +381,86 @@ async function chatWithOpenClaw(userText) {
   return text.trim().slice(0, 1800);
 }
 
+async function streamChatToWecom(userText, toUser) {
+  const url = `${OPENCLAW_BASE_URL.replace(/\/$/, '')}/chat/completions`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (OPENCLAW_API_KEY) {
+    headers.Authorization = `Bearer ${OPENCLAW_API_KEY}`;
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: OPENCLAW_MODEL,
+      stream: true,
+      messages: [{ role: 'user', content: userText }]
+    })
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`stream request failed: ${response.status}`);
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let textBuffer = '';
+  let sentAny = false;
+  let chunkCount = 0;
+
+  const flush = async (force = false) => {
+    const trimmed = textBuffer.trim();
+    if (!trimmed) return;
+    if (!force && !shouldFlushChunk(trimmed)) return;
+
+    const prefix = sentAny ? '' : '正在生成回复:\n';
+    await pushText(`${prefix}${trimmed}`, toUser);
+    sentAny = true;
+    chunkCount += 1;
+    textBuffer = '';
+  };
+
+  for await (const part of response.body) {
+    buffer += decoder.decode(part, { stream: true });
+
+    while (buffer.includes('\n')) {
+      const idx = buffer.indexOf('\n');
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data) continue;
+      if (data === '[DONE]') {
+        await flush(true);
+        if (!sentAny) {
+          await pushText('模型没有返回可读内容。', toUser);
+        } else if (chunkCount > 1) {
+          await pushText('回答完毕。', toUser);
+        }
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(data);
+        const delta = extractDelta(payload);
+        if (!delta) continue;
+        textBuffer += delta;
+        if (chunkCount < 6) {
+          await flush(false);
+        }
+      } catch (_) {
+        // Ignore malformed stream chunk and continue.
+      }
+    }
+  }
+
+  await flush(true);
+  if (!sentAny) {
+    throw new Error('stream ended without content');
+  }
+}
+
 app.get('/health', (_, res) => res.json({ ok: true }));
 
 app.get('/wecom/callback', (req, res) => {
@@ -402,17 +501,13 @@ app.post('/wecom/callback', express.text({ type: ['application/xml', 'text/xml']
       try {
         if (isCommand(normalizedContent)) {
           reply = await handleCmd(normalizedContent);
+          await pushText(reply, fromUser);
         } else {
-          reply = await chatWithOpenClaw(content);
+          await streamChatToWecom(content, fromUser);
         }
       } catch (e) {
         reply = `执行失败: ${e.message}`;
-      }
-
-      try {
         await pushText(reply, fromUser);
-      } catch (e) {
-        console.error('push reply fail:', e.message);
       }
     })();
 
