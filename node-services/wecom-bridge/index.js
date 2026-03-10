@@ -180,6 +180,46 @@ function sanitizeChatReply(text) {
   return parts.join('\n').slice(0, 1500) || '收到你的消息了，但没有得到可读回复。';
 }
 
+function commandHelpText() {
+  return [
+    'personal-crm 指令帮助',
+    '',
+    '基础命令:',
+    'status  查看 personal-crm 服务状态',
+    'poll  立即触发一次收件轮询',
+    'dashboard  查看管理看板地址',
+    'leads  查看最近 3 条线索及分析',
+    '',
+    '线索操作:',
+    'draft <id>  查看该线索的 AI 分析和回复草稿',
+    'reanalyze <id>  重新调用 AI 分析该线索',
+    'approve <id>  先预览 AI 草稿并进入确认步骤',
+    'confirm approve <id>  确认发送 AI 草稿',
+    'reply <id> <内容>  用你提供的内容手动回复',
+    'reject <id>  标记该线索暂不回复'
+  ].join('\n');
+}
+
+function buildToolCommand(toolCall) {
+  const tool = String(toolCall?.tool || '').trim().toLowerCase();
+  const id = Number(toolCall?.id || 0);
+  const content = String(toolCall?.content || '').trim();
+
+  if (tool === 'help') return 'help';
+  if (tool === 'status') return 'status';
+  if (tool === 'poll') return 'poll';
+  if (tool === 'dashboard') return 'dashboard';
+  if (tool === 'leads') return 'leads';
+  if (!Number.isInteger(id) || id <= 0) return '';
+  if (tool === 'draft') return `draft ${id}`;
+  if (tool === 'reanalyze') return `reanalyze ${id}`;
+  if (tool === 'approve') return `approve ${id}`;
+  if (tool === 'confirm_approve') return `confirm approve ${id}`;
+  if (tool === 'reject') return `reject ${id}`;
+  if (tool === 'reply' && content) return `reply ${id} ${content}`;
+  return '';
+}
+
 function categoryLabel(category) {
   const key = String(category || 'general').toLowerCase();
   const labels = {
@@ -198,23 +238,7 @@ async function handleCmd(content) {
   const low = t.toLowerCase();
 
   if (low === 'help' || low === 'crm help') {
-    return [
-      'personal-crm 指令帮助',
-      '',
-      '基础命令:',
-      'status  查看 personal-crm 服务状态',
-      'poll  立即触发一次收件轮询',
-      'dashboard  查看管理看板地址',
-      'leads  查看最近 3 条线索及分析',
-      '',
-      '线索操作:',
-      'draft <id>  查看该线索的 AI 分析和回复草稿',
-      'reanalyze <id>  重新调用 AI 分析该线索',
-      'approve <id>  先预览 AI 草稿并进入确认步骤',
-      'confirm approve <id>  确认发送 AI 草稿',
-      'reply <id> <内容>  用你提供的内容手动回复',
-      'reject <id>  标记该线索暂不回复'
-    ].join('\n');
+    return commandHelpText();
   }
 
   if (low === 'status') {
@@ -340,17 +364,7 @@ async function handleCmd(content) {
 
   return [
     '命令说明:',
-    'help  查看 personal-crm 指令帮助',
-    'status  查看 personal-crm 服务状态',
-    'poll  立即触发一次收件轮询',
-    'dashboard  查看管理看板地址',
-    'leads  查看最近 3 条线索及分析',
-    'draft <id>  查看该线索的 AI 分析和回复草稿',
-    'reanalyze <id>  重新调用 AI 分析该线索',
-    'approve <id>  先预览 AI 草稿并进入确认步骤',
-    'confirm approve <id>  确认发送 AI 草稿',
-    'reply <id> <内容>  用你提供的内容手动回复',
-    'reject <id>  标记该线索不回复'
+    commandHelpText()
   ].join('\n');
 }
 
@@ -407,6 +421,58 @@ async function chatWithOpenClaw(userText) {
   return sanitizeChatReply(text);
 }
 
+async function detectToolIntent(userText) {
+  const url = `${OPENCLAW_BASE_URL.replace(/\/$/, '')}/chat/completions`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (OPENCLAW_API_KEY) {
+    headers.Authorization = `Bearer ${OPENCLAW_API_KEY}`;
+  }
+
+  const prompt = [
+    '你是企业微信中的 CRM 工具路由器。',
+    '判断用户这句话是否应该调用 personal-crm 工具。',
+    '只能返回 JSON，不要返回其他文字。',
+    '格式:',
+    '{"mode":"tool|chat","tool":"help|status|poll|dashboard|leads|draft|reanalyze|approve|confirm_approve|reply|reject","id":0,"content":""}',
+    '规则:',
+    '1. 用户在查线索、看草稿、重分析、批准、拒绝、人工回复时，mode 必须是 tool。',
+    '2. 像“查看线索3的AI分析和回复草稿”应该映射为 {"mode":"tool","tool":"draft","id":3,"content":""}。',
+    '3. 像“重新分析3”映射为 reanalyze。',
+    '4. 像“回复3 收到，test”映射为 reply，content 写回复内容。',
+    '5. 如果只是普通闲聊、问答、开放式问题，mode 返回 chat。',
+    '6. 不确定时优先返回 tool，只要用户明显在操作 CRM。'
+  ].join('');
+
+  const resp = await axios.post(
+    url,
+    {
+      model: OPENCLAW_MODEL,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: userText }
+      ]
+    },
+    { headers, timeout: 30000 }
+  );
+
+  const raw = String(resp.data?.choices?.[0]?.message?.content || '').trim();
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (_) {
+        return { mode: 'chat' };
+      }
+    }
+    return { mode: 'chat' };
+  }
+}
+
 app.get('/health', (_, res) => res.json({ ok: true }));
 
 app.get('/wecom/callback', (req, res) => {
@@ -449,7 +515,15 @@ app.post('/wecom/callback', express.text({ type: ['application/xml', 'text/xml']
           await pushText(reply, fromUser);
         } else {
           await pushText('收到，正在处理，请稍候。', fromUser);
-          const reply = await chatWithOpenClaw(content);
+          let reply = '';
+          const toolIntent = await detectToolIntent(content).catch(() => ({ mode: 'chat' }));
+          const toolCommand = buildToolCommand(toolIntent);
+
+          if (String(toolIntent?.mode || '').toLowerCase() === 'tool' && toolCommand) {
+            reply = await handleCmd(toolCommand);
+          } else {
+            reply = await chatWithOpenClaw(content);
+          }
           await pushText(reply, fromUser);
         }
       } catch (e) {
