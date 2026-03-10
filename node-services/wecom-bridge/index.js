@@ -181,6 +181,28 @@ function sanitizeChatReply(text) {
   return parts.join('\n').slice(0, 1500) || '收到你的消息了，但没有得到可读回复。';
 }
 
+function looksLikeCrmIntent(text) {
+  const value = String(text || '').trim().toLowerCase();
+  if (!value) return false;
+  return [
+    '线索',
+    '草稿',
+    '回复',
+    '重分析',
+    '邮件',
+    'crm',
+    'lead',
+    'draft',
+    'reanalyze',
+    'approve',
+    'reject',
+    'poll',
+    'status',
+    'dashboard',
+    '看板'
+  ].some(keyword => value.includes(keyword));
+}
+
 function commandHelpText() {
   return [
     'personal-crm 指令帮助',
@@ -517,11 +539,15 @@ app.post('/wecom/callback', express.text({ type: ['application/xml', 'text/xml']
         } else {
           await pushText('收到，正在处理，请稍候。', fromUser);
           let reply = '';
-          const toolIntent = await detectToolIntent(content).catch(() => ({ mode: 'chat' }));
-          const toolCommand = buildToolCommand(toolIntent);
+          if (looksLikeCrmIntent(content)) {
+            const toolIntent = await detectToolIntent(content).catch(() => ({ mode: 'chat' }));
+            const toolCommand = buildToolCommand(toolIntent);
 
-          if (String(toolIntent?.mode || '').toLowerCase() === 'tool' && toolCommand) {
-            reply = await handleCmd(toolCommand);
+            if (String(toolIntent?.mode || '').toLowerCase() === 'tool' && toolCommand) {
+              reply = await handleCmd(toolCommand);
+            } else {
+              reply = await chatWithOpenClaw(content);
+            }
           } else {
             reply = await chatWithOpenClaw(content);
           }
