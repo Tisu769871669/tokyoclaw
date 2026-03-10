@@ -22,4 +22,4 @@ Extra env for chat fallback:
 
 Behavior:
 - Command text (`status/poll/dashboard/leads/approve/reply/reject`) -> handled as control command
-- Other text -> forwarded to OpenClaw chat API and reply back to WeCom
+- Other text -> forwarded to OpenClaw chat API and sent back as a cleaned final reply (plus an immediate "processing" notice)
