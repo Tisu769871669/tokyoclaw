@@ -194,6 +194,26 @@ async function handleCmd(content) {
   const t = (content || '').trim();
   const low = t.toLowerCase();
 
+  if (low === 'help' || low === 'crm help') {
+    return [
+      'personal-crm 指令帮助',
+      '',
+      '基础命令:',
+      'status  查看 personal-crm 服务状态',
+      'poll  立即触发一次收件轮询',
+      'dashboard  查看管理看板地址',
+      'leads  查看最近 3 条线索及分析',
+      '',
+      '线索操作:',
+      'draft <id>  查看该线索的 AI 分析和回复草稿',
+      'reanalyze <id>  重新调用 AI 分析该线索',
+      'approve <id>  先预览 AI 草稿并进入确认步骤',
+      'confirm approve <id>  确认发送 AI 草稿',
+      'reply <id> <内容>  用你提供的内容手动回复',
+      'reject <id>  标记该线索暂不回复'
+    ].join('\n');
+  }
+
   if (low === 'status') {
     const r = await axios.get(`${CRM}/health`, { timeout: 8000 });
     return `personal-crm: ${JSON.stringify(r.data)}`;
@@ -317,6 +337,7 @@ async function handleCmd(content) {
 
   return [
     '命令说明:',
+    'help  查看 personal-crm 指令帮助',
     'status  查看 personal-crm 服务状态',
     'poll  立即触发一次收件轮询',
     'dashboard  查看管理看板地址',
@@ -334,6 +355,7 @@ function isCommand(content) {
   const t = (content || '').trim();
   if (!t) return false;
   const low = t.toLowerCase();
+  if (low === 'help' || low === 'crm help') return true;
   if (low === 'status' || low === 'poll' || low === 'leads' || low === 'dashboard') return true;
   if (/^draft\s+\d+$/i.test(t)) return true;
   if (/^reanalyze\s+\d+$/i.test(t)) return true;
@@ -353,6 +375,7 @@ function normalizeCommand(content) {
   if (/最新.*邮件/.test(t)) return 'leads';
   if (/查看.*邮件/.test(t)) return 'leads';
   if (/看板|dashboard|仪表盘/.test(t)) return 'dashboard';
+  if (/^help$/i.test(t) || /^crm help$/i.test(t) || /帮助|命令/.test(t)) return 'help';
 
   return t;
 }
