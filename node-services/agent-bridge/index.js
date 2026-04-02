@@ -49,13 +49,13 @@ function validateChatBody(body) {
 }
 
 function normalizeSessionPart(value, maxLen = 80) {
-  const normalized = cleanText(value).replace(/[^a-zA-Z0-9:_-]/g, '_');
+  const normalized = cleanText(value).replace(/[^a-zA-Z0-9_-]/g, '_');
   if (!normalized) return 'unknown';
   return normalized.slice(0, maxLen);
 }
 
 function buildSessionId(agentId, conversationId) {
-  return `bridge:${normalizeSessionPart(agentId, 40)}:${normalizeSessionPart(conversationId, 80)}`;
+  return `bridge_${normalizeSessionPart(agentId, 40)}_${normalizeSessionPart(conversationId, 80)}`;
 }
 
 function tryParseJson(raw) {
