@@ -293,7 +293,6 @@ function normalizeChatBody(body) {
 function validateChatBody(normalized) {
   if (!normalized.conversationId) return 'conversationId is required';
   if (!normalized.message) return 'message/content.messageList is required';
-  if (!normalized.userId) return 'userId is required';
   return '';
 }
 

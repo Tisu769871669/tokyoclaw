@@ -27,7 +27,6 @@ Content-Type: application/json; charset=utf-8
 ```json
 {
   "conversationId": "session_005",
-  "userId": "user_001",
   "content": {
     "messageList": [
       {
@@ -44,7 +43,7 @@ Content-Type: application/json; charset=utf-8
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---:|---|
 | `conversationId` | string | 是 | 会话 ID。同一个用户必须保持稳定，系统会基于它维持上下文连续性。 |
-| `userId` | string | 是 | 用户唯一标识。 |
+| `userId` | string | 否 | 用户唯一标识。当前不是必填，后续如需做用户级记忆或统计可再使用。 |
 | `content` | object | 是 | 消息内容对象。 |
 | `content.messageList` | array | 是 | 消息列表。当前系统会优先取列表中最后一条用户消息作为本轮输入。 |
 | `content.messageList[].role` | string | 否 | 消息角色。建议用户消息传 `user`。 |
@@ -70,7 +69,7 @@ Content-Type: application/json; charset=utf-8
   "ok": true,
   "agent_id": "snowchuang",
   "conversation_id": "session_005",
-  "user_id": "user_001",
+  "user_id": "",
   "reply": "亲亲好～ 我是雪创的专属客服助手❄️\n\n能帮您搞定购物全流程：\n\n- 挑款式\n- 解疑惑\n- 算优惠\n- 查订单\n- 保售后\n\n您今天有什么想了解的？直接跟我说就行！😊",
   "session_id": "bridge_snowchuang_session_005",
   "trace_id": "2cf96b2f-b04f-4484-bb4f-4317c3321139"
@@ -115,13 +114,13 @@ Content-Type: application/json; charset=utf-8
 - 请求体请始终使用 `UTF-8`
 - 调用方最终只需要取返回中的 `reply` 发回微信
 - 如需排查问题，请保留 `trace_id`
+- 当前可以不传 `userId`
 
 ## PowerShell 调用示例
 
 ```powershell
 $body = @{
   conversationId = "session_005"
-  userId = "user_001"
   content = @{
     messageList = @(
       @{
@@ -150,7 +149,6 @@ curl -X POST "http://tokyoclaw.metast.cn:9070/api/agents/snowchuang/chat" \
   -H "Content-Type: application/json; charset=utf-8" \
   --data-binary '{
     "conversationId": "session_005",
-    "userId": "user_001",
     "content": {
       "messageList": [
         {
