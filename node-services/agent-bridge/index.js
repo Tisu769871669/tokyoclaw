@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 
 const app = express();
@@ -11,6 +13,9 @@ const BRIDGE_TOKEN = String(process.env.AGENT_BRIDGE_TOKEN || '').trim();
 const OPENCLAW_BIN = String(process.env.OPENCLAW_BIN || 'openclaw').trim();
 const DEFAULT_AGENT_ID = String(process.env.DEFAULT_AGENT_ID || 'snowchuang').trim();
 const AGENT_TIMEOUT_SECONDS = Number(process.env.AGENT_TIMEOUT_SECONDS || 120);
+const KNOWLEDGE_FILE = String(process.env.KNOWLEDGE_FILE || '客服回复优化.txt').trim();
+const KB_TOP_K = Number(process.env.KB_TOP_K || 3);
+const KB_MIN_SCORE = Number(process.env.KB_MIN_SCORE || 3);
 
 function buildTraceId() {
   return crypto.randomUUID();
@@ -18,6 +23,12 @@ function buildTraceId() {
 
 function cleanText(value) {
   return String(value || '').trim();
+}
+
+function resolveKnowledgeFilePath(filePath) {
+  if (!filePath) return '';
+  if (path.isAbsolute(filePath)) return filePath;
+  return path.join(__dirname, filePath);
 }
 
 function parseMaybeJson(value) {
@@ -33,6 +44,162 @@ function parseMaybeJson(value) {
 
 function stripAnsi(value) {
   return String(value || '').replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+}
+
+function normalizeLineText(value) {
+  return cleanText(value).replace(/\s+/g, ' ');
+}
+
+function loadKnowledgeEntries(filePath) {
+  if (!filePath) return [];
+  const resolved = resolveKnowledgeFilePath(filePath);
+  if (!fs.existsSync(resolved)) return [];
+
+  const raw = fs.readFileSync(resolved, 'utf8').replace(/\r\n/g, '\n');
+  const lines = raw.split('\n');
+  const entries = [];
+  let section = '';
+  let question = '';
+  let answerParts = [];
+
+  function flush() {
+    const finalQuestion = normalizeLineText(question);
+    const finalAnswer = normalizeLineText(answerParts.join(' '));
+    if (finalQuestion && finalAnswer) {
+      entries.push({
+        section,
+        question: finalQuestion,
+        answer: finalAnswer
+      });
+    }
+    question = '';
+    answerParts = [];
+  }
+
+  for (const rawLine of lines) {
+    const line = cleanText(rawLine);
+    if (!line || /^---+$/.test(line)) continue;
+
+    if (!/^\d+[.、]/.test(line) && /问题/.test(line) && /（\d+[-—]?\d*）/.test(line)) {
+      flush();
+      section = normalizeLineText(line);
+      continue;
+    }
+
+    const questionMatch = line.match(/^\d+[.、]\s*(.*)$/);
+    if (questionMatch) {
+      flush();
+      question = questionMatch[1].replace(/^问题[:：]\s*/, '').trim();
+      continue;
+    }
+
+    const answerMatch = line.match(/^答案[:：]\s*(.*)$/);
+    if (answerMatch) {
+      answerParts.push(answerMatch[1].trim());
+      continue;
+    }
+
+    if (question) {
+      if (answerParts.length) {
+        answerParts.push(line);
+      } else {
+        question = `${question} ${line}`.trim();
+      }
+    }
+  }
+
+  flush();
+  return entries;
+}
+
+function tokenizeForSearch(text) {
+  const value = String(text || '').toLowerCase();
+  const tokens = [];
+  const latin = value.match(/[a-z0-9]+/g) || [];
+  tokens.push(...latin);
+
+  const hanSeqs = value.match(/[\p{Script=Han}]+/gu) || [];
+  for (const seq of hanSeqs) {
+    if (seq.length === 1) {
+      tokens.push(seq);
+      continue;
+    }
+    tokens.push(seq);
+    for (let i = 0; i < seq.length - 1; i += 1) {
+      tokens.push(seq.slice(i, i + 2));
+    }
+  }
+
+  return tokens.filter(Boolean);
+}
+
+function scoreKnowledgeEntry(query, entry) {
+  const normalizedQuery = normalizeLineText(query);
+  if (!normalizedQuery) return 0;
+
+  let score = 0;
+  const question = entry.question || '';
+  const answer = entry.answer || '';
+  const section = entry.section || '';
+
+  if (question.includes(normalizedQuery)) score += 20;
+  if (answer.includes(normalizedQuery)) score += 10;
+
+  const queryTokens = tokenizeForSearch(normalizedQuery);
+  const questionTokens = new Set(tokenizeForSearch(question));
+  const answerTokens = new Set(tokenizeForSearch(answer));
+  const sectionTokens = new Set(tokenizeForSearch(section));
+
+  for (const token of queryTokens) {
+    if (!token) continue;
+    if (questionTokens.has(token)) {
+      score += token.length >= 2 ? 4 : 1;
+    } else if (answerTokens.has(token)) {
+      score += token.length >= 2 ? 2 : 0.5;
+    } else if (sectionTokens.has(token)) {
+      score += 1;
+    }
+  }
+
+  return score;
+}
+
+const knowledgeFilePath = resolveKnowledgeFilePath(KNOWLEDGE_FILE);
+const knowledgeEntries = loadKnowledgeEntries(KNOWLEDGE_FILE);
+
+function buildKnowledgeContext(message) {
+  if (!knowledgeEntries.length) return '';
+
+  const ranked = knowledgeEntries
+    .map(entry => ({
+      ...entry,
+      score: scoreKnowledgeEntry(message, entry)
+    }))
+    .filter(entry => entry.score >= KB_MIN_SCORE)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(KB_TOP_K, 1));
+
+  if (!ranked.length) return '';
+
+  return ranked.map((entry, index) => [
+    `候选知识 ${index + 1}`,
+    `分类: ${entry.section || '未分类'}`,
+    `问题: ${entry.question}`,
+    `答案: ${entry.answer}`
+  ].join('\n')).join('\n\n');
+}
+
+function composeAgentMessage(message) {
+  const knowledgeContext = buildKnowledgeContext(message);
+  if (!knowledgeContext) return message;
+
+  return [
+    '你正在服务雪创客户。',
+    '以下是本轮根据用户问题从雪创知识库检索到的候选信息，仅在相关时使用；如果不相关请忽略。',
+    '不要在回复中提及知识库、资料、上下文、检索、文档等字眼。',
+    knowledgeContext,
+    `用户本轮消息：${message}`
+  ].join('\n\n');
 }
 
 function requireAuth(req, res) {
@@ -197,6 +364,7 @@ function extractReply(payload, fallbackText) {
 
 function runOpenClawAgent({ agentId, sessionId, message, traceId }) {
   return new Promise((resolve, reject) => {
+    const finalMessage = composeAgentMessage(message);
     const args = [
       'agent',
       '--agent',
@@ -204,7 +372,7 @@ function runOpenClawAgent({ agentId, sessionId, message, traceId }) {
       '--session-id',
       sessionId,
       '--message',
-      message,
+      finalMessage,
       '--json',
       '--timeout',
       String(AGENT_TIMEOUT_SECONDS)
@@ -315,7 +483,9 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     default_agent_id: DEFAULT_AGENT_ID,
-    openclaw_bin: OPENCLAW_BIN
+    openclaw_bin: OPENCLAW_BIN,
+    knowledge_file: knowledgeFilePath,
+    knowledge_entries: knowledgeEntries.length
   });
 });
 

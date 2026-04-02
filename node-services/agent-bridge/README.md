@@ -8,6 +8,7 @@ Current MVP:
 - required JSON fields: `conversationId`, `userId`, and either `message` or `content.messageList`
 - bearer auth via `AGENT_BRIDGE_TOKEN`
 - maps each `conversation_id` to a stable OpenClaw `session_id`
+- supports lightweight local retrieval from `客服回复优化.txt` before calling the agent
 
 Example request:
 
@@ -51,3 +52,9 @@ Endpoints:
 - `GET /health`
 - `POST /api/agents/:agentId/chat`
 - `POST /api/agents/chat` (uses `DEFAULT_AGENT_ID`)
+
+Local knowledge base:
+
+- default file: `客服回复优化.txt`
+- parsed as FAQ entries at service startup
+- top matches are injected as hidden context for the current turn
