@@ -80,6 +80,11 @@ function extractReply(payload, fallbackText) {
     return cleanText(fallbackText);
   }
 
+  const payloadText = payload?.payloads?.find(item => typeof item?.text === 'string' && cleanText(item.text))?.text;
+  if (payloadText) {
+    return cleanText(payloadText);
+  }
+
   const candidates = [
     payload.reply,
     payload.response,
