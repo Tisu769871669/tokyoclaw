@@ -20,6 +20,17 @@ function cleanText(value) {
   return String(value || '').trim();
 }
 
+function parseMaybeJson(value) {
+  if (typeof value !== 'string') return value;
+  const text = cleanText(value);
+  if (!text) return value;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return value;
+  }
+}
+
 function stripAnsi(value) {
   return String(value || '').replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
 }
@@ -37,14 +48,85 @@ function requireAuth(req, res) {
   return false;
 }
 
-function validateChatBody(body) {
-  const conversationId = cleanText(body?.conversation_id);
-  const message = cleanText(body?.message);
-  const userId = cleanText(body?.user_id);
+function pickMessageText(item) {
+  if (!item) return '';
+  if (typeof item === 'string') return cleanText(item);
 
-  if (!conversationId) return 'conversation_id is required';
-  if (!message) return 'message is required';
-  if (!userId) return 'user_id is required';
+  const candidates = [
+    item.text,
+    item.content,
+    item.message,
+    item.body,
+    item.question,
+    item.query
+  ];
+
+  for (const value of candidates) {
+    const text = cleanText(value);
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function pickMessageRole(item) {
+  const candidates = [
+    item?.role,
+    item?.senderRole,
+    item?.sender_type,
+    item?.type
+  ];
+
+  for (const value of candidates) {
+    const text = cleanText(value).toLowerCase();
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function extractMessageFromList(messageList) {
+  if (!Array.isArray(messageList) || !messageList.length) return '';
+
+  for (let i = messageList.length - 1; i >= 0; i -= 1) {
+    const item = parseMaybeJson(messageList[i]);
+    const role = pickMessageRole(item);
+    const text = pickMessageText(item);
+    if (!text) continue;
+    if (!role || ['user', 'customer', 'client', 'visitor', 'human'].includes(role)) {
+      return text;
+    }
+  }
+
+  for (let i = messageList.length - 1; i >= 0; i -= 1) {
+    const item = parseMaybeJson(messageList[i]);
+    const text = pickMessageText(item);
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function normalizeChatBody(body) {
+  const content = parseMaybeJson(body?.content);
+  const messageList = parseMaybeJson(content?.messageList ?? body?.messageList);
+  const conversationId = cleanText(body?.conversationId || body?.conversation_id);
+  const userId = cleanText(body?.userId || body?.user_id || body?.uid);
+  const message = cleanText(body?.message || body?.text || body?.query) || extractMessageFromList(messageList);
+
+  return {
+    conversationId,
+    userId,
+    message,
+    content,
+    messageList: Array.isArray(messageList) ? messageList : []
+  };
+}
+
+function validateChatBody(normalized) {
+  if (!normalized.conversationId) return 'conversationId is required';
+  if (!normalized.message) return 'message/content.messageList is required';
+  if (!normalized.userId) return 'userId is required';
   return '';
 }
 
@@ -185,7 +267,8 @@ function runOpenClawAgent({ agentId, sessionId, message, traceId }) {
 async function handleChat(req, res, agentId) {
   if (!requireAuth(req, res)) return;
 
-  const error = validateChatBody(req.body);
+  const normalizedBody = normalizeChatBody(req.body || {});
+  const error = validateChatBody(normalizedBody);
   if (error) {
     return res.status(400).json({
       ok: false,
@@ -196,9 +279,9 @@ async function handleChat(req, res, agentId) {
   }
 
   const traceId = buildTraceId();
-  const conversationId = cleanText(req.body.conversation_id);
-  const userId = cleanText(req.body.user_id);
-  const message = cleanText(req.body.message);
+  const conversationId = normalizedBody.conversationId;
+  const userId = normalizedBody.userId;
+  const message = normalizedBody.message;
   const sessionId = buildSessionId(agentId, conversationId);
 
   try {

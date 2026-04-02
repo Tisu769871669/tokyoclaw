@@ -5,7 +5,7 @@
 Current MVP:
 
 - `POST /api/agents/:agentId/chat`
-- required JSON fields: `conversation_id`, `message`, `user_id`
+- required JSON fields: `conversationId`, `userId`, and either `message` or `content.messageList`
 - bearer auth via `AGENT_BRIDGE_TOKEN`
 - maps each `conversation_id` to a stable OpenClaw `session_id`
 
@@ -16,11 +16,21 @@ curl -X POST http://127.0.0.1:9070/api/agents/snowchuang/chat \
   -H "Authorization: Bearer replace_me" \
   -H "Content-Type: application/json" \
   -d '{
-    "conversation_id": "wxid_o8abc123",
-    "message": "你好，想咨询一下价格",
-    "user_id": "wxid_o8abc123"
+    "conversationId": "wxid_o8abc123",
+    "userId": "wxid_o8abc123",
+    "content": {
+      "messageList": [
+        { "role": "user", "text": "你好，想咨询一下价格" }
+      ]
+    }
   }'
 ```
+
+Backward compatible aliases are still accepted:
+
+- `conversation_id`
+- `user_id`
+- `message`
 
 Example success response:
 
