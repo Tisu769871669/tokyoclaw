@@ -85,6 +85,11 @@ function extractReply(payload, fallbackText) {
     return cleanText(payloadText);
   }
 
+  const nestedPayloadText = payload?.result?.payloads?.find(item => typeof item?.text === 'string' && cleanText(item.text))?.text;
+  if (nestedPayloadText) {
+    return cleanText(nestedPayloadText);
+  }
+
   const candidates = [
     payload.reply,
     payload.response,
