@@ -189,17 +189,43 @@ function buildKnowledgeContext(message) {
   ].join('\n')).join('\n\n');
 }
 
-function composeAgentMessage(message) {
-  const knowledgeContext = buildKnowledgeContext(message);
-  if (!knowledgeContext) return message;
+function buildRecentConversationContext(messageList, limit = 6) {
+  if (!Array.isArray(messageList) || !messageList.length) return '';
 
-  return [
+  const recent = messageList.slice(-Math.max(limit, 1));
+  return recent.map((item, index) => {
+    const speaker = item.role === 'assistant' ? '客服' : '客户';
+    return `${index + 1}. ${speaker}: ${item.text}`;
+  }).join('\n');
+}
+
+function composeAgentMessage(message, messageList = []) {
+  const knowledgeContext = buildKnowledgeContext(message);
+  const recentConversation = buildRecentConversationContext(messageList);
+
+  if (!knowledgeContext && !recentConversation) return message;
+
+  const parts = [
     '你正在服务雪创客户。',
-    '以下是本轮根据用户问题从雪创知识库检索到的候选信息，仅在相关时使用；如果不相关请忽略。',
-    '不要在回复中提及知识库、资料、上下文、检索、文档等字眼。',
-    knowledgeContext,
-    `用户本轮消息：${message}`
-  ].join('\n\n');
+    '不要在回复中提及知识库、资料、上下文、检索、文档等字眼。'
+  ];
+
+  if (recentConversation) {
+    parts.push(
+      '以下是调用方提供的最近几轮聊天记录，请结合它理解上下文：',
+      recentConversation
+    );
+  }
+
+  if (knowledgeContext) {
+    parts.push(
+      '以下是本轮根据用户问题从雪创知识库检索到的候选信息，仅在相关时使用；如果不相关请忽略。',
+      knowledgeContext
+    );
+  }
+
+  parts.push(`用户本轮消息：${message}`);
+  return parts.join('\n\n');
 }
 
 function requireAuth(req, res) {
@@ -236,6 +262,17 @@ function pickMessageText(item) {
   return '';
 }
 
+function normalizeRole(rawRole, item) {
+  const role = cleanText(rawRole).toLowerCase();
+  if (['user', 'customer', 'client', 'visitor', 'human'].includes(role)) return 'user';
+  if (['assistant', 'agent', 'bot', 'ai', '客服'].includes(role)) return 'assistant';
+
+  const sender = cleanText(item?.sender || item?.senderId || item?.from || item?.fromUser || item?.from_user);
+  if (/客服|assistant|agent|bot|ai/i.test(sender)) return 'assistant';
+
+  return role || 'user';
+}
+
 function pickMessageRole(item) {
   const candidates = [
     item?.role,
@@ -246,19 +283,35 @@ function pickMessageRole(item) {
 
   for (const value of candidates) {
     const text = cleanText(value).toLowerCase();
-    if (text) return text;
+    if (text) return normalizeRole(text, item);
   }
 
-  return '';
+  return normalizeRole('', item);
+}
+
+function normalizeMessageList(messageList) {
+  if (!Array.isArray(messageList)) return [];
+
+  return messageList
+    .map(entry => parseMaybeJson(entry))
+    .map(entry => {
+      const text = pickMessageText(entry);
+      if (!text) return null;
+      return {
+        role: pickMessageRole(entry),
+        text
+      };
+    })
+    .filter(Boolean);
 }
 
 function extractMessageFromList(messageList) {
   if (!Array.isArray(messageList) || !messageList.length) return '';
 
   for (let i = messageList.length - 1; i >= 0; i -= 1) {
-    const item = parseMaybeJson(messageList[i]);
-    const role = pickMessageRole(item);
-    const text = pickMessageText(item);
+    const item = messageList[i];
+    const role = item.role;
+    const text = item.text;
     if (!text) continue;
     if (!role || ['user', 'customer', 'client', 'visitor', 'human'].includes(role)) {
       return text;
@@ -266,8 +319,8 @@ function extractMessageFromList(messageList) {
   }
 
   for (let i = messageList.length - 1; i >= 0; i -= 1) {
-    const item = parseMaybeJson(messageList[i]);
-    const text = pickMessageText(item);
+    const item = messageList[i];
+    const text = item.text;
     if (text) return text;
   }
 
@@ -275,18 +328,22 @@ function extractMessageFromList(messageList) {
 }
 
 function normalizeChatBody(body) {
-  const content = parseMaybeJson(body?.content);
-  const messageList = parseMaybeJson(content?.messageList ?? body?.messageList);
+  const rawContent = parseMaybeJson(body?.content);
+  const contentText = typeof rawContent === 'string' ? cleanText(rawContent) : '';
+  const rawMessageList = parseMaybeJson(
+    (rawContent && typeof rawContent === 'object' ? rawContent.messageList : undefined) ?? body?.messageList
+  );
+  const messageList = normalizeMessageList(rawMessageList);
   const conversationId = cleanText(body?.conversationId || body?.conversation_id);
   const userId = cleanText(body?.userId || body?.user_id || body?.uid);
-  const message = cleanText(body?.message || body?.text || body?.query) || extractMessageFromList(messageList);
+  const message = cleanText(body?.message || body?.text || body?.query) || contentText || extractMessageFromList(messageList);
 
   return {
     conversationId,
     userId,
     message,
-    content,
-    messageList: Array.isArray(messageList) ? messageList : []
+    content: rawContent,
+    messageList
   };
 }
 
@@ -361,9 +418,9 @@ function extractReply(payload, fallbackText) {
   return cleanText(fallbackText);
 }
 
-function runOpenClawAgent({ agentId, sessionId, message, traceId }) {
+function runOpenClawAgent({ agentId, sessionId, message, messageList, traceId }) {
   return new Promise((resolve, reject) => {
-    const finalMessage = composeAgentMessage(message);
+    const finalMessage = composeAgentMessage(message, messageList);
     const args = [
       'agent',
       '--agent',
@@ -449,6 +506,7 @@ async function handleChat(req, res, agentId) {
   const conversationId = normalizedBody.conversationId;
   const userId = normalizedBody.userId;
   const message = normalizedBody.message;
+  const messageList = normalizedBody.messageList;
   const sessionId = buildSessionId(agentId, conversationId);
 
   try {
@@ -456,6 +514,7 @@ async function handleChat(req, res, agentId) {
       agentId,
       sessionId,
       message,
+      messageList,
       traceId
     });
 

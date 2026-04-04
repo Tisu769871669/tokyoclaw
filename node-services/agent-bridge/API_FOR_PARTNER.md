@@ -44,8 +44,8 @@ Content-Type: application/json; charset=utf-8
 |---|---|---:|---|
 | `conversationId` | string | 是 | 会话 ID。同一个用户必须保持稳定，系统会基于它维持上下文连续性。 |
 | `userId` | string | 否 | 用户唯一标识。当前不是必填，后续如需做用户级记忆或统计可再使用。 |
-| `content` | object | 是 | 消息内容对象。 |
-| `content.messageList` | array | 是 | 消息列表。当前系统会优先取列表中最后一条用户消息作为本轮输入。 |
+| `content` | object/string | 是 | 可以是消息内容对象，也可以直接是一段文本。 |
+| `content.messageList` | array | 否 | 最近几轮聊天记录。系统会优先取列表中最后一条用户消息作为本轮输入，并把最近几轮作为辅助上下文。 |
 | `content.messageList[].role` | string | 否 | 消息角色。建议用户消息传 `user`。 |
 | `content.messageList[].text` | string | 否 | 消息文本内容。 |
 
@@ -53,14 +53,16 @@ Content-Type: application/json; charset=utf-8
 
 系统当前处理规则如下：
 
-1. 优先读取 `content.messageList`
-2. 从后往前查找最后一条用户消息
+1. 如果 `content` 是字符串，则直接把它当作本轮用户消息
+2. 如果存在 `content.messageList`，则从后往前查找最后一条用户消息作为本轮输入
 3. 如果找不到明确 `role=user` 的消息，则从后往前取最后一条可读文本
+4. `messageList` 中最近几轮聊天记录会作为辅助上下文传给 Agent
 
 因此建议调用方始终保证：
 
 - 最新一条用户消息放在 `messageList` 末尾
 - 用户消息的 `role` 显式传 `user`
+- 如果当前没有聊天记录数组，也可以直接传 `content: "用户本轮消息"`
 
 ## 返回示例
 

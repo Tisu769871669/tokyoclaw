@@ -5,7 +5,7 @@
 Current MVP:
 
 - `POST /api/agents/:agentId/chat`
-- required JSON fields: `conversationId`, and either `message` or `content.messageList`
+- required JSON fields: `conversationId`, and one of: `message` / `content`(string) / `content.messageList`
 - bearer auth via `AGENT_BRIDGE_TOKEN`
 - maps each `conversation_id` to a stable OpenClaw `session_id`
 - supports lightweight local retrieval from `客服回复优化.txt` before calling the agent
@@ -28,6 +28,7 @@ curl -X POST http://127.0.0.1:9070/api/agents/snowchuang/chat \
 
 Backward compatible aliases are still accepted:
 
+- `content` can be a plain string message
 - `conversation_id`
 - `user_id`
 - `message`
