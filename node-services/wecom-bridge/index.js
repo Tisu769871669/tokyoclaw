@@ -380,12 +380,11 @@ function commandHelpText() {
   return [
     'personal-crm 指令帮助',
     '',
-    '基础命令:',
+    '本地 CRM 命令:',
     'status  查看 personal-crm 服务状态',
     'poll  立即触发一次收件轮询',
     'dashboard  查看管理看板地址',
     'leads  查看最近 3 条线索及分析',
-    '自动获客 [数量] [google|bing]  让 main agent 控制 leadgen subagent 执行获客并汇总',
     '',
     '线索操作:',
     'draft <id>  查看该线索的 AI 分析和回复草稿',
@@ -393,7 +392,11 @@ function commandHelpText() {
     'approve <id>  先预览 AI 草稿并进入确认步骤',
     'confirm approve <id>  确认发送 AI 草稿',
     'reply <id> <内容>  用你提供的内容手动回复',
-    'reject <id>  标记该线索暂不回复'
+    'reject <id>  标记该线索暂不回复',
+    '',
+    'Agent 编排命令:',
+    '自动获客 [数量] [google|bing]  由 main agent 调度 leadgen subagent 执行获客并汇总结果',
+    '说明: 这类命令不是 wecom-bridge 本地直接执行，会继续调用 agent / skill 工作流'
   ].join('\n');
 }
 
