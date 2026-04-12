@@ -24,3 +24,12 @@ Extra env for chat fallback:
 Behavior:
 - Command text (`status/poll/dashboard/leads/approve/reply/reject`) -> handled as control command
 - Other text -> forwarded to OpenClaw chat API and sent back as a cleaned final reply (plus an immediate "processing" notice)
+
+Leadgen orchestration:
+- `自动获客`
+- `自动获客 3`
+- `自动获客 5 google`
+- `自动获客 3 bing`
+
+These commands do not scrape in `wecom-bridge` itself.
+Instead, `wecom-bridge` invokes the `main` agent through `openclaw agent`, the `main` agent executes the installed `openclaw-leadgen` skill workflow, delegates collection to the `leadgen` subagent, then returns a concise summary back to WeCom.

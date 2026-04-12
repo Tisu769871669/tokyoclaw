@@ -2,6 +2,9 @@
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
 
 const app = express();
 app.use(express.json());
@@ -15,6 +18,17 @@ const OPENCLAW_API_KEY = process.env.OPENCLAW_API_KEY || '';
 const OPENCLAW_MODEL = process.env.OPENCLAW_MODEL || 'openclaw';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://127.0.0.1:9060';
 const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 0);
+const OPENCLAW_BIN = String(process.env.OPENCLAW_BIN || 'openclaw').trim();
+const MAIN_AGENT_ID = String(process.env.MAIN_AGENT_ID || 'main').trim();
+const MAIN_AGENT_TIMEOUT_SECONDS = Number(process.env.MAIN_AGENT_TIMEOUT_SECONDS || 1800);
+const LEADGEN_WORKSPACE_ROOT = String(process.env.LEADGEN_WORKSPACE_ROOT || '/root/.openclaw/workspace-leadgen').trim();
+const LEADGEN_SKILL_ROOT = String(process.env.LEADGEN_SKILL_ROOT || '/root/.openclaw/skills/openclaw-leadgen').trim();
+const LEADGEN_COLLECTOR_AGENT_ID = String(process.env.LEADGEN_COLLECTOR_AGENT_ID || 'leadgen').trim();
+const LEADGEN_DEFAULT_MAX_QUERIES = Number(process.env.LEADGEN_DEFAULT_MAX_QUERIES || 3);
+const LEADGEN_DEFAULT_ENGINE = String(process.env.LEADGEN_DEFAULT_ENGINE || 'google').trim().toLowerCase();
+const LEADGEN_MAIN_PROMPT_FILE = String(
+  process.env.LEADGEN_MAIN_PROMPT_FILE || path.join(LEADGEN_SKILL_ROOT, 'prompts', 'main-agent-auto-leadgen.md')
+).trim();
 
 function sha1(s) {
   return crypto.createHash('sha1').update(s).digest('hex');
@@ -159,6 +173,70 @@ function compactText(text, limit = 220) {
   return String(text || '').replace(/\s+/g, ' ').trim().slice(0, limit) || '无';
 }
 
+function normalizeSessionPart(value, maxLen = 80) {
+  const normalized = String(value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (!normalized) return 'unknown';
+  return normalized.slice(0, maxLen);
+}
+
+function stripAnsi(value) {
+  return String(value || '').replace(/\x1B\[[0-9;]*[A-Za-z]/g, '');
+}
+
+function tryParseJson(raw) {
+  const text = stripAnsi(raw).trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    const startObject = text.indexOf('{');
+    const startArray = text.indexOf('[');
+    const starts = [startObject, startArray].filter(x => x >= 0);
+    if (!starts.length) return null;
+    try {
+      return JSON.parse(text.slice(Math.min(...starts)));
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+function extractAgentReply(payload, fallbackText = '') {
+  if (!payload || typeof payload !== 'object') {
+    return String(fallbackText || '').trim();
+  }
+
+  const payloads = payload?.result?.payloads;
+  if (Array.isArray(payloads)) {
+    const textItem = payloads.find(item => typeof item?.text === 'string' && item.text.trim());
+    if (textItem) return textItem.text.trim();
+  }
+
+  const directPayloads = payload?.payloads;
+  if (Array.isArray(directPayloads)) {
+    const textItem = directPayloads.find(item => typeof item?.text === 'string' && item.text.trim());
+    if (textItem) return textItem.text.trim();
+  }
+
+  const candidates = [
+    payload.reply,
+    payload.response,
+    payload.content,
+    payload.message,
+    payload.output_text,
+    payload.text,
+    payload?.result?.reply,
+    payload?.result?.response,
+    payload?.result?.content,
+    payload?.result?.message
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  return String(fallbackText || '').trim();
+}
+
 function sanitizeChatReply(text) {
   const cleaned = String(text || '')
     .replace(/```[\s\S]*?```/g, '')
@@ -179,6 +257,101 @@ function sanitizeChatReply(text) {
     .slice(0, 8);
 
   return parts.join('\n').slice(0, 1500) || '收到你的消息了，但没有得到可读回复。';
+}
+
+function isLeadgenCommand(text) {
+  const value = String(text || '').trim().toLowerCase();
+  if (!value) return false;
+  return value.startsWith('自动获客') || value.startsWith('leadgen');
+}
+
+function parseLeadgenOptions(text) {
+  const raw = String(text || '').trim();
+  const engine = /\bbing\b/i.test(raw) ? 'bing' : /\bgoogle\b/i.test(raw) ? 'google' : LEADGEN_DEFAULT_ENGINE;
+  const match = raw.match(/\b(\d{1,2})\b/);
+  const parsed = match ? Number(match[1]) : NaN;
+  const maxQueries = Number.isFinite(parsed) && parsed > 0 ? parsed : LEADGEN_DEFAULT_MAX_QUERIES;
+  return { raw, engine, maxQueries };
+}
+
+function loadLeadgenMainPrompt() {
+  if (!fs.existsSync(LEADGEN_MAIN_PROMPT_FILE)) {
+    throw new Error(`leadgen prompt file not found: ${LEADGEN_MAIN_PROMPT_FILE}`);
+  }
+  return fs.readFileSync(LEADGEN_MAIN_PROMPT_FILE, 'utf8');
+}
+
+function renderLeadgenMainPrompt(template, vars) {
+  let out = String(template || '');
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), String(value));
+  }
+  return out;
+}
+
+async function runMainAgentWorkflow(message, sessionId) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      'agent',
+      '--agent',
+      MAIN_AGENT_ID,
+      '--session-id',
+      sessionId,
+      '--message',
+      message,
+      '--json',
+      '--thinking',
+      'medium',
+      '--timeout',
+      String(MAIN_AGENT_TIMEOUT_SECONDS)
+    ];
+
+    const child = spawn(OPENCLAW_BIN, args, {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+    });
+    child.on('error', err => reject(err));
+    child.on('close', code => {
+      if (code !== 0) {
+        return reject(new Error(stripAnsi(stderr) || `openclaw exited with code ${code}`));
+      }
+      const parsed = tryParseJson(stdout);
+      const reply = extractAgentReply(parsed, stdout);
+      if (!reply) {
+        return reject(new Error('main agent returned no readable reply'));
+      }
+      resolve({ reply, raw: parsed || stdout });
+    });
+  });
+}
+
+async function handleAutoLeadgen(content, fromUser) {
+  const options = parseLeadgenOptions(content);
+  const template = loadLeadgenMainPrompt();
+  const collectorSessionId = `leadgen_wecom_${normalizeSessionPart(fromUser, 48)}`;
+  const mainSessionId = `main_wecom_leadgen_${normalizeSessionPart(fromUser, 48)}`;
+  const prompt = renderLeadgenMainPrompt(template, {
+    USER_REQUEST: options.raw,
+    WECOM_USER: fromUser,
+    WORKSPACE_ROOT: LEADGEN_WORKSPACE_ROOT,
+    SKILL_ROOT: LEADGEN_SKILL_ROOT,
+    COLLECTOR_AGENT_ID: LEADGEN_COLLECTOR_AGENT_ID,
+    COLLECTOR_SESSION_ID: collectorSessionId,
+    MAX_QUERIES: options.maxQueries,
+    SEARCH_ENGINE: options.engine
+  });
+
+  const result = await runMainAgentWorkflow(prompt, mainSessionId);
+  return sanitizeChatReply(result.reply);
 }
 
 function looksLikeCrmIntent(text) {
@@ -212,6 +385,7 @@ function commandHelpText() {
     'poll  立即触发一次收件轮询',
     'dashboard  查看管理看板地址',
     'leads  查看最近 3 条线索及分析',
+    '自动获客 [数量] [google|bing]  让 main agent 控制 leadgen subagent 执行获客并汇总',
     '',
     '线索操作:',
     'draft <id>  查看该线索的 AI 分析和回复草稿',
@@ -256,9 +430,13 @@ function categoryLabel(category) {
   return labels[key] || key;
 }
 
-async function handleCmd(content) {
+async function handleCmd(content, fromUser) {
   const t = (content || '').trim();
   const low = t.toLowerCase();
+
+  if (isLeadgenCommand(t)) {
+    return handleAutoLeadgen(t, fromUser);
+  }
 
   if (low === 'help' || low === 'crm help') {
     return commandHelpText();
@@ -395,6 +573,7 @@ function isCommand(content) {
   const t = (content || '').trim();
   if (!t) return false;
   const low = t.toLowerCase();
+  if (isLeadgenCommand(t)) return true;
   if (low === 'help' || low === 'crm help') return true;
   if (low === 'status' || low === 'poll' || low === 'leads' || low === 'dashboard') return true;
   if (/^draft\s+\d+$/i.test(t)) return true;
@@ -534,7 +713,7 @@ app.post('/wecom/callback', express.text({ type: ['application/xml', 'text/xml']
     (async () => {
       try {
         if (isCommand(normalizedContent)) {
-          const reply = await handleCmd(normalizedContent);
+          const reply = await handleCmd(normalizedContent, fromUser);
           await pushText(reply, fromUser);
         } else {
           await pushText('收到，正在处理，请稍候。', fromUser);
@@ -544,7 +723,7 @@ app.post('/wecom/callback', express.text({ type: ['application/xml', 'text/xml']
             const toolCommand = buildToolCommand(toolIntent);
 
             if (String(toolIntent?.mode || '').toLowerCase() === 'tool' && toolCommand) {
-              reply = await handleCmd(toolCommand);
+              reply = await handleCmd(toolCommand, fromUser);
             } else {
               reply = await chatWithOpenClaw(content);
             }
