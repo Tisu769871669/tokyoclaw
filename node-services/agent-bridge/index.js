@@ -205,24 +205,18 @@ function composeAgentMessage(message, messageList = []) {
 
   if (!knowledgeContext && !recentConversation) return message;
 
-  const parts = [
-    '你正在服务雪创客户。',
-    '回复要更像真人聊天，口语化一些，少点书面感。',
-    '默认尽量简短，优先用2到4句短句说清楚，不要动不动列很多条。',
-    '除非客户明确要求详细介绍、对比、步骤说明，否则不要长篇大论。',
-    '不要在回复中提及知识库、资料、上下文、检索、文档等字眼。'
-  ];
+  const parts = [];
 
   if (recentConversation) {
     parts.push(
-      '以下是调用方提供的最近几轮聊天记录，请结合它理解上下文：',
+      '最近聊天记录：',
       recentConversation
     );
   }
 
   if (knowledgeContext) {
     parts.push(
-      '以下是本轮根据用户问题从雪创知识库检索到的候选信息，仅在相关时使用；如果不相关请忽略。',
+      '相关问答：',
       knowledgeContext
     );
   }
