@@ -7,8 +7,9 @@ Current MVP:
 - `POST /api/agents/:agentId/chat`
 - required JSON fields: `conversationId`, and one of: `message` / `content`(string) / `content.messageList`
 - bearer auth via `AGENT_BRIDGE_TOKEN`
-- maps each `conversation_id` to a stable OpenClaw `session_id`
+- maps each `agentId + conversationId` to isolated bridge-owned history
 - supports lightweight local retrieval from `客服回复优化.txt` before calling the agent
+- calls OpenClaw with a per-request run session to avoid cross-user internal context bleed
 
 Example request:
 
@@ -58,3 +59,10 @@ Local knowledge base:
 - default file: `客服回复优化.txt`
 - parsed as FAQ entries at service startup
 - top matches are injected as hidden context for the current turn
+
+Session isolation:
+
+- default store: `.sessions`
+- key scope: `agentId + conversationId`
+- default retained history: last 20 normalized messages
+- OpenClaw internal session id is per request; bridge history is the source of conversation continuity

@@ -17,6 +17,8 @@ build/
 
 # Local Codex metadata
 .agent/
+.sessions/
+node-services/agent-bridge/.sessions/
 
 # Local certs / secrets
 *.pem

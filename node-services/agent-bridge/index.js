@@ -16,6 +16,8 @@ const AGENT_TIMEOUT_SECONDS = Number(process.env.AGENT_TIMEOUT_SECONDS || 120);
 const KNOWLEDGE_FILE = String(process.env.KNOWLEDGE_FILE || '客服回复优化.txt').trim();
 const KB_TOP_K = Number(process.env.KB_TOP_K || 3);
 const KB_MIN_SCORE = Number(process.env.KB_MIN_SCORE || 3);
+const SESSION_STORE_DIR = String(process.env.SESSION_STORE_DIR || '.sessions').trim();
+const SESSION_HISTORY_LIMIT = Number(process.env.SESSION_HISTORY_LIMIT || 20);
 
 function buildTraceId() {
   return crypto.randomUUID();
@@ -29,6 +31,12 @@ function resolveKnowledgeFilePath(filePath) {
   if (!filePath) return '';
   if (path.isAbsolute(filePath)) return filePath;
   return path.join(__dirname, filePath);
+}
+
+function resolveSessionStoreDir(dirPath) {
+  if (!dirPath) return path.join(__dirname, '.sessions');
+  if (path.isAbsolute(dirPath)) return dirPath;
+  return path.join(__dirname, dirPath);
 }
 
 function parseMaybeJson(value) {
@@ -48,6 +56,26 @@ function stripAnsi(value) {
 
 function normalizeLineText(value) {
   return cleanText(value).replace(/\s+/g, ' ');
+}
+
+function ensureDir(dirPath) {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function safeJsonRead(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function safeJsonWrite(filePath, value) {
+  ensureDir(path.dirname(filePath));
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(value, null, 2), 'utf8');
+  fs.renameSync(tempPath, filePath);
 }
 
 function loadKnowledgeEntries(filePath) {
@@ -166,6 +194,7 @@ function scoreKnowledgeEntry(query, entry) {
 
 const knowledgeFilePath = resolveKnowledgeFilePath(KNOWLEDGE_FILE);
 const knowledgeEntries = loadKnowledgeEntries(KNOWLEDGE_FILE);
+const sessionStoreDir = resolveSessionStoreDir(SESSION_STORE_DIR);
 
 function buildKnowledgeContext(message) {
   if (!knowledgeEntries.length) return '';
@@ -223,6 +252,52 @@ function composeAgentMessage(message, messageList = []) {
 
   parts.push(`用户本轮消息：${message}`);
   return parts.join('\n\n');
+}
+
+function sessionFilePath(agentId, conversationId) {
+  const hash = crypto
+    .createHash('sha1')
+    .update(`${agentId}:${conversationId}`)
+    .digest('hex')
+    .slice(0, 16);
+  const agentPart = normalizeSessionPart(agentId, 40);
+  const conversationPart = normalizeSessionPart(conversationId, 80);
+  return path.join(sessionStoreDir, `${agentPart}_${conversationPart}_${hash}.json`);
+}
+
+function loadSessionMessages(agentId, conversationId) {
+  const payload = safeJsonRead(sessionFilePath(agentId, conversationId), { messages: [] });
+  return normalizeMessageList(payload.messages || []);
+}
+
+function saveSessionMessages(agentId, conversationId, messages) {
+  const cleanMessages = normalizeMessageList(messages).slice(-Math.max(SESSION_HISTORY_LIMIT, 2));
+  safeJsonWrite(sessionFilePath(agentId, conversationId), {
+    agentId,
+    conversationId,
+    updatedAt: new Date().toISOString(),
+    messages: cleanMessages
+  });
+  return cleanMessages;
+}
+
+function appendSessionTurn(agentId, conversationId, userMessage, assistantReply) {
+  const current = loadSessionMessages(agentId, conversationId);
+  current.push({ role: 'user', text: userMessage });
+  current.push({ role: 'assistant', text: assistantReply });
+  return saveSessionMessages(agentId, conversationId, current);
+}
+
+function removeCurrentMessageFromContext(messageList, message) {
+  const normalizedMessage = cleanText(message);
+  if (!Array.isArray(messageList) || !messageList.length || !normalizedMessage) return messageList || [];
+
+  const next = [...messageList];
+  const last = next[next.length - 1];
+  if (last?.role === 'user' && cleanText(last.text) === normalizedMessage) {
+    next.pop();
+  }
+  return next;
 }
 
 function requireAuth(req, res) {
@@ -358,6 +433,10 @@ function normalizeSessionPart(value, maxLen = 80) {
 
 function buildSessionId(agentId, conversationId) {
   return `bridge_${normalizeSessionPart(agentId, 40)}_${normalizeSessionPart(conversationId, 80)}`;
+}
+
+function buildRunSessionId(agentId, traceId) {
+  return `run_${normalizeSessionPart(agentId, 40)}_${normalizeSessionPart(traceId.replace(/-/g, ''), 40)}`;
 }
 
 function tryParseJson(raw) {
@@ -503,17 +582,21 @@ async function handleChat(req, res, agentId) {
   const conversationId = normalizedBody.conversationId;
   const userId = normalizedBody.userId;
   const message = normalizedBody.message;
-  const messageList = normalizedBody.messageList;
   const sessionId = buildSessionId(agentId, conversationId);
+  const requestContext = removeCurrentMessageFromContext(normalizedBody.messageList, message);
+  const storedContext = loadSessionMessages(agentId, conversationId);
+  const messageList = requestContext.length ? requestContext : storedContext;
+  const runSessionId = buildRunSessionId(agentId, traceId);
 
   try {
     const result = await runOpenClawAgent({
       agentId,
-      sessionId,
+      sessionId: runSessionId,
       message,
       messageList,
       traceId
     });
+    appendSessionTurn(agentId, conversationId, message, result.reply);
 
     return res.json({
       ok: true,
@@ -540,7 +623,9 @@ app.get('/health', (_req, res) => {
     default_agent_id: DEFAULT_AGENT_ID,
     openclaw_bin: OPENCLAW_BIN,
     knowledge_file: knowledgeFilePath,
-    knowledge_entries: knowledgeEntries.length
+    knowledge_entries: knowledgeEntries.length,
+    session_store_dir: sessionStoreDir,
+    session_history_limit: SESSION_HISTORY_LIMIT
   });
 });
 
