@@ -51,6 +51,59 @@ Create these files on the server:
 
 Use the corresponding `.env.example` files as templates.
 
+## Snowchuang OpenClaw skill
+
+The Snowchuang ordering API skill lives in this repo at:
+
+- `/opt/claw/openclaw-skills/snowchuang/xuechuang-ordering`
+
+Install it into the Snowchuang agent workspace on the server:
+
+```bash
+mkdir -p ~/.openclaw/workspace-snowchuang/skills
+rsync -a /opt/claw/openclaw-skills/snowchuang/xuechuang-ordering/ \
+  ~/.openclaw/workspace-snowchuang/skills/xuechuang-ordering/
+```
+
+Configure credentials without committing them to git. Either inject them through OpenClaw config:
+
+```bash
+openclaw config set 'skills.entries["xuechuang-ordering"].env' \
+  '{"XCDHT_MCP_KEY":"replace_me","XCDHT_MCP_SECRET":"replace_me"}'
+```
+
+Or add them to `/opt/claw/node-services/agent-bridge/.env` so the spawned OpenClaw process inherits them:
+
+```bash
+XCDHT_MCP_KEY=replace_me
+XCDHT_MCP_SECRET='replace_me'
+```
+
+Quote `XCDHT_MCP_SECRET` when it contains `#`, `$`, `&`, `!`, `%`, or spaces.
+
+After changing the skill or credentials:
+
+```bash
+pm2 restart agent-bridge --update-env
+test -f ~/.openclaw/workspace-snowchuang/skills/xuechuang-ordering/SKILL.md
+```
+
+If credentials are in `agent-bridge/.env`, verify the helper script with the same environment:
+
+```bash
+set -a
+. /opt/claw/node-services/agent-bridge/.env
+set +a
+python3 ~/.openclaw/workspace-snowchuang/skills/xuechuang-ordering/scripts/xcdht_api.py \
+  users --page-no 1 --page-size 1
+```
+
+Then run one end-to-end Snowchuang agent smoke test:
+
+```bash
+openclaw agent --agent snowchuang --message "查一下雪创订货通用户列表第一页，只返回1个用户id和会员等级" --json
+```
+
 ## PM2 processes
 
 ```bash
