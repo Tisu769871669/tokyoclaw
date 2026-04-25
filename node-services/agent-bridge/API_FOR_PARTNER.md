@@ -83,7 +83,7 @@ Content-Type: application/json; charset=utf-8
 1. `status` 等于 `1` 时，系统认为这是好友通过事件
 2. 系统会原样使用请求里的 `sendId`、`recvId`、`tenantId`
 3. 系统会按 `tenantId` 选择对应的 `mcpKey`、`mcpSecret`
-4. 系统会调用配置的微信消息发送接口，发送固定欢迎语和链接
+4. 系统会按 `tenantId` 选择对应租户的欢迎语
 5. 调用发送接口时会把 `sendId`、`recvId`、`content`、`tenantId` 作为 query param 传出
 6. 成功后返回 `204 No Content`，不会返回 `reply`
 7. 该分支不会调用 OpenClaw Agent

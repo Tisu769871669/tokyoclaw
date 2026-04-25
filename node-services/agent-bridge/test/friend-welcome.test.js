@@ -71,6 +71,24 @@ test('buildFriendWelcomeContent combines fixed text and link', () => {
   assert.equal(content, '欢迎添加雪创客服\nhttps://example.test/welcome');
 });
 
+test('buildFriendWelcomeContent prefers tenant welcome content from credential map', () => {
+  const content = buildFriendWelcomeContent(
+    {
+      FRIEND_WELCOME_TENANT_CREDENTIALS: JSON.stringify({
+        125: {
+          mcpKey: 'tenant-key-125',
+          mcpSecret: 'tenant-secret-125',
+          welcomeContent: '雪创租户欢迎语'
+        }
+      }),
+      FRIEND_WELCOME_CONTENT: '全局欢迎语'
+    },
+    '125'
+  );
+
+  assert.equal(content, '雪创租户欢迎语');
+});
+
 test('buildFriendWelcomeSendRequest keeps sendId and recvId from the push payload unchanged', () => {
   const request = buildFriendWelcomeSendRequest(
     {
@@ -83,7 +101,8 @@ test('buildFriendWelcomeSendRequest keeps sendId and recvId from the push payloa
       FRIEND_WELCOME_TENANT_CREDENTIALS: JSON.stringify({
         125: {
           mcpKey: 'tenant-key-125',
-          mcpSecret: 'tenant-secret-125'
+          mcpSecret: 'tenant-secret-125',
+          welcomeContent: '雪创租户欢迎语'
         }
       }),
       FRIEND_WELCOME_TEXT: '欢迎添加雪创客服',
@@ -94,7 +113,7 @@ test('buildFriendWelcomeSendRequest keeps sendId and recvId from the push payloa
   assert.equal(request.url.searchParams.get('sendId'), 'new-user-wxid');
   assert.equal(request.url.searchParams.get('recvId'), 'service-wxid');
   assert.equal(request.url.searchParams.get('tenantId'), '125');
-  assert.equal(request.url.searchParams.get('content'), '欢迎添加雪创客服\nhttps://example.test/welcome');
+  assert.equal(request.url.searchParams.get('content'), '雪创租户欢迎语');
   assert.deepEqual(request.headers, {
     mcpKey: 'tenant-key-125',
     mcpSecret: 'tenant-secret-125'

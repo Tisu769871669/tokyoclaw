@@ -64,7 +64,7 @@ curl -i -X POST http://127.0.0.1:9070/api/agents/snowchuang/chat \
   }'
 ```
 
-For this event, `agent-bridge` calls `FRIEND_WELCOME_SEND_URL` with the original `sendId`, `recvId`, and `tenantId`, resolves the matching tenant credentials from `FRIEND_WELCOME_TENANT_CREDENTIALS`, then returns `204 No Content` without calling the agent.
+For this event, `agent-bridge` calls `FRIEND_WELCOME_SEND_URL` with the original `sendId`, `recvId`, and `tenantId`, resolves the matching tenant credentials and welcome content from `FRIEND_WELCOME_TENANT_CREDENTIALS`, then returns `204 No Content` without calling the agent.
 
 Endpoints:
 
