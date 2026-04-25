@@ -6,6 +6,7 @@ Current MVP:
 
 - `POST /api/agents/:agentId/chat`
 - required JSON fields: `conversationId`, and one of: `message` / `content`(string) / `content.messageList`
+- friend approval payloads with `status=1`, `sendId`, `recvId`, and `conversationId` are sent through the configured WeChat message API directly and return `204 No Content`
 - bearer auth via `AGENT_BRIDGE_TOKEN`
 - maps each `agentId + conversationId` to isolated bridge-owned history
 - supports lightweight local retrieval from `客服回复优化.txt` before calling the agent
@@ -47,6 +48,22 @@ Example success response:
   "trace_id": "2f9b1c44-93f5-4eb7-8b17-b3bdc5999f12"
 }
 ```
+
+Friend approval welcome request:
+
+```bash
+curl -i -X POST http://127.0.0.1:9070/api/agents/snowchuang/chat \
+  -H "Authorization: Bearer replace_me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": 1,
+    "sendId": "new-user-wxid",
+    "recvId": "service-wxid",
+    "conversationId": "wxid_o8abc123"
+  }'
+```
+
+For this event, `agent-bridge` calls `FRIEND_WELCOME_SEND_URL` with the original `sendId` and `recvId`, then returns `204 No Content` without calling the agent.
 
 Endpoints:
 

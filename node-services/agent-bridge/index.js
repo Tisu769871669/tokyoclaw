@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { handleFriendWelcomePayload } = require('./friend-welcome');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -567,6 +568,30 @@ function runOpenClawAgent({ agentId, sessionId, message, messageList, traceId })
 async function handleChat(req, res, agentId) {
   if (!requireAuth(req, res)) return;
 
+  const traceId = buildTraceId();
+  try {
+    const friendWelcomeResult = await handleFriendWelcomePayload(req.body || {});
+    if (friendWelcomeResult.handled) {
+      if (friendWelcomeResult.statusCode === 204) {
+        return res.status(204).send();
+      }
+
+      return res.status(friendWelcomeResult.statusCode || 400).json({
+        ok: false,
+        error: friendWelcomeResult.error || 'friend_welcome_failed',
+        message: friendWelcomeResult.message || 'friend welcome failed',
+        trace_id: traceId
+      });
+    }
+  } catch (err) {
+    return res.status(502).json({
+      ok: false,
+      error: 'friend_welcome_send_failed',
+      message: cleanText(err.message) || 'friend welcome send failed',
+      trace_id: traceId
+    });
+  }
+
   const normalizedBody = normalizeChatBody(req.body || {});
   const error = validateChatBody(normalizedBody);
   if (error) {
@@ -574,11 +599,10 @@ async function handleChat(req, res, agentId) {
       ok: false,
       error: 'invalid_request',
       message: error,
-      trace_id: buildTraceId()
+      trace_id: traceId
     });
   }
 
-  const traceId = buildTraceId();
   const conversationId = normalizedBody.conversationId;
   const userId = normalizedBody.userId;
   const message = normalizedBody.message;

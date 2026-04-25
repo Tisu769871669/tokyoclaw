@@ -20,6 +20,10 @@ build/
 .sessions/
 node-services/agent-bridge/.sessions/
 
+# Local experimental bundles
+handoff/
+openclaw-leadgen-pack/
+
 # Local certs / secrets
 *.pem
 *.key

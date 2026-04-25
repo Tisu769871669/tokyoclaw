@@ -64,6 +64,27 @@ Content-Type: application/json; charset=utf-8
 - 用户消息的 `role` 显式传 `user`
 - 如果当前没有聊天记录数组，也可以直接传 `content: "用户本轮消息"`
 
+## 好友通过欢迎事件
+
+如果调用方在同一个接口推送好友通过事件，传以下字段：
+
+```json
+{
+  "status": 1,
+  "sendId": "发送人微信号",
+  "recvId": "接收人微信号",
+  "conversationId": "会话id"
+}
+```
+
+处理规则：
+
+1. `status` 等于 `1` 时，系统认为这是好友通过事件
+2. 系统会原样使用请求里的 `sendId`、`recvId`
+3. 系统会调用配置的微信消息发送接口，发送固定欢迎语和链接
+4. 成功后返回 `204 No Content`，不会返回 `reply`
+5. 该分支不会调用 OpenClaw Agent
+
 ## 返回示例
 
 ```json
