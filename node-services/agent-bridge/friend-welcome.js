@@ -18,9 +18,10 @@ function parseFriendWelcomeEvent(body) {
     status,
     sendId: cleanText(body.sendId),
     recvId: cleanText(body.recvId),
-    conversationId: cleanText(body.conversationId || body.conversation_id)
+    conversationId: cleanText(body.conversationId || body.conversation_id),
+    tenantId: cleanText(body.tenantId || body.tenantid || body.tenant_id)
   };
-  const missing = ['sendId', 'recvId', 'conversationId'].filter(key => !event[key]);
+  const missing = ['sendId', 'recvId', 'conversationId', 'tenantId'].filter(key => !event[key]);
 
   if (missing.length) {
     return {
@@ -46,15 +47,53 @@ function buildFriendWelcomeContent(env = process.env) {
   ].filter(Boolean).join('\n');
 }
 
+function normalizeEnvKeyPart(value) {
+  return cleanText(value).replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function parseTenantCredentials(env = process.env) {
+  const raw = cleanText(env.FRIEND_WELCOME_TENANT_CREDENTIALS);
+  if (!raw) return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    throw new Error('FRIEND_WELCOME_TENANT_CREDENTIALS must be valid JSON');
+  }
+}
+
+function resolveFriendWelcomeCredentials(tenantId, env = process.env) {
+  const normalizedTenantId = cleanText(tenantId);
+  const envKeyPart = normalizeEnvKeyPart(normalizedTenantId);
+  const tenantCredentials = parseTenantCredentials(env);
+  const scopedCredentials = tenantCredentials[normalizedTenantId] || tenantCredentials[envKeyPart] || {};
+
+  return {
+    mcpKey: cleanText(
+      env[`FRIEND_WELCOME_TENANT_${envKeyPart}_MCP_KEY`] ||
+      scopedCredentials.mcpKey ||
+      scopedCredentials.mcp_key ||
+      env.FRIEND_WELCOME_MCP_KEY
+    ),
+    mcpSecret: cleanText(
+      env[`FRIEND_WELCOME_TENANT_${envKeyPart}_MCP_SECRET`] ||
+      scopedCredentials.mcpSecret ||
+      scopedCredentials.mcp_secret ||
+      env.FRIEND_WELCOME_MCP_SECRET
+    )
+  };
+}
+
 function buildFriendWelcomeSendRequest(event, env = process.env) {
   const sendUrl = cleanText(env.FRIEND_WELCOME_SEND_URL) || DEFAULT_SEND_URL;
-  const mcpKey = cleanText(env.FRIEND_WELCOME_MCP_KEY);
-  const mcpSecret = cleanText(env.FRIEND_WELCOME_MCP_SECRET);
+  const { mcpKey, mcpSecret } = resolveFriendWelcomeCredentials(event?.tenantId, env);
   const content = buildFriendWelcomeContent(env);
 
   const missing = [];
-  if (!mcpKey) missing.push('FRIEND_WELCOME_MCP_KEY');
-  if (!mcpSecret) missing.push('FRIEND_WELCOME_MCP_SECRET');
+  if (!event?.tenantId) missing.push('tenantId');
+  if (!mcpKey) missing.push(`mcpKey for tenant ${event?.tenantId || 'unknown'}`);
+  if (!mcpSecret) missing.push(`mcpSecret for tenant ${event?.tenantId || 'unknown'}`);
   if (!content) missing.push('FRIEND_WELCOME_CONTENT or FRIEND_WELCOME_TEXT');
   if (!event?.sendId) missing.push('sendId');
   if (!event?.recvId) missing.push('recvId');
@@ -66,6 +105,7 @@ function buildFriendWelcomeSendRequest(event, env = process.env) {
   const url = new URL(sendUrl);
   url.searchParams.set('sendId', event.sendId);
   url.searchParams.set('recvId', event.recvId);
+  url.searchParams.set('tenantId', event.tenantId);
   url.searchParams.set('content', content);
 
   return {
@@ -143,5 +183,6 @@ module.exports = {
   buildFriendWelcomeSendRequest,
   handleFriendWelcomePayload,
   parseFriendWelcomeEvent,
+  resolveFriendWelcomeCredentials,
   sendFriendWelcomeMessage
 };

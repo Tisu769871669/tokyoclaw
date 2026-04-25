@@ -7,6 +7,7 @@ const {
   buildFriendWelcomeSendRequest,
   handleFriendWelcomePayload,
   parseFriendWelcomeEvent,
+  resolveFriendWelcomeCredentials,
   sendFriendWelcomeMessage
 } = require('../friend-welcome');
 
@@ -15,7 +16,8 @@ test('parseFriendWelcomeEvent recognizes status 1 friend approval events', () =>
     status: 1,
     sendId: 'new-user-wxid',
     recvId: 'service-wxid',
-    conversationId: 'conv-001'
+    conversationId: 'conv-001',
+    tenantId: '125'
   });
 
   assert.equal(result.isEvent, true);
@@ -23,8 +25,22 @@ test('parseFriendWelcomeEvent recognizes status 1 friend approval events', () =>
     status: '1',
     sendId: 'new-user-wxid',
     recvId: 'service-wxid',
-    conversationId: 'conv-001'
+    conversationId: 'conv-001',
+    tenantId: '125'
   });
+});
+
+test('parseFriendWelcomeEvent accepts lowercase tenantid alias', () => {
+  const result = parseFriendWelcomeEvent({
+    status: 1,
+    sendId: 'new-user-wxid',
+    recvId: 'service-wxid',
+    conversationId: 'conv-001',
+    tenantid: '1948976347957321730'
+  });
+
+  assert.equal(result.isEvent, true);
+  assert.equal(result.event.tenantId, '1948976347957321730');
 });
 
 test('parseFriendWelcomeEvent ignores normal chat payloads', () => {
@@ -43,7 +59,7 @@ test('parseFriendWelcomeEvent reports missing friend approval fields', () => {
   });
 
   assert.equal(result.isEvent, true);
-  assert.deepEqual(result.missing, ['recvId', 'conversationId']);
+  assert.deepEqual(result.missing, ['recvId', 'conversationId', 'tenantId']);
 });
 
 test('buildFriendWelcomeContent combines fixed text and link', () => {
@@ -59,12 +75,17 @@ test('buildFriendWelcomeSendRequest keeps sendId and recvId from the push payloa
   const request = buildFriendWelcomeSendRequest(
     {
       sendId: 'new-user-wxid',
-      recvId: 'service-wxid'
+      recvId: 'service-wxid',
+      tenantId: '125'
     },
     {
       FRIEND_WELCOME_SEND_URL: 'https://lx.metast.cn/prod-api/system/api/im/sendWxIdMesage',
-      FRIEND_WELCOME_MCP_KEY: 'key-1',
-      FRIEND_WELCOME_MCP_SECRET: 'secret-1',
+      FRIEND_WELCOME_TENANT_CREDENTIALS: JSON.stringify({
+        125: {
+          mcpKey: 'tenant-key-125',
+          mcpSecret: 'tenant-secret-125'
+        }
+      }),
       FRIEND_WELCOME_TEXT: '欢迎添加雪创客服',
       FRIEND_WELCOME_LINK: 'https://example.test/welcome'
     }
@@ -72,10 +93,23 @@ test('buildFriendWelcomeSendRequest keeps sendId and recvId from the push payloa
 
   assert.equal(request.url.searchParams.get('sendId'), 'new-user-wxid');
   assert.equal(request.url.searchParams.get('recvId'), 'service-wxid');
+  assert.equal(request.url.searchParams.get('tenantId'), '125');
   assert.equal(request.url.searchParams.get('content'), '欢迎添加雪创客服\nhttps://example.test/welcome');
   assert.deepEqual(request.headers, {
-    mcpKey: 'key-1',
-    mcpSecret: 'secret-1'
+    mcpKey: 'tenant-key-125',
+    mcpSecret: 'tenant-secret-125'
+  });
+});
+
+test('resolveFriendWelcomeCredentials falls back to global credentials for unknown tenants', () => {
+  const credentials = resolveFriendWelcomeCredentials('missing-tenant', {
+    FRIEND_WELCOME_MCP_KEY: 'global-key',
+    FRIEND_WELCOME_MCP_SECRET: 'global-secret'
+  });
+
+  assert.deepEqual(credentials, {
+    mcpKey: 'global-key',
+    mcpSecret: 'global-secret'
   });
 });
 
@@ -97,12 +131,17 @@ test('sendFriendWelcomeMessage sends the configured GET request', async () => {
     const result = await sendFriendWelcomeMessage(
       {
         sendId: 'new-user-wxid',
-        recvId: 'service-wxid'
+        recvId: 'service-wxid',
+        tenantId: '125'
       },
       {
         FRIEND_WELCOME_SEND_URL: `http://127.0.0.1:${port}/sendWxIdMesage`,
-        FRIEND_WELCOME_MCP_KEY: 'key-1',
-        FRIEND_WELCOME_MCP_SECRET: 'secret-1',
+        FRIEND_WELCOME_TENANT_CREDENTIALS: JSON.stringify({
+          125: {
+            mcpKey: 'key-1',
+            mcpSecret: 'secret-1'
+          }
+        }),
         FRIEND_WELCOME_TEXT: '欢迎添加雪创客服',
         FRIEND_WELCOME_LINK: 'https://example.test/welcome',
         FRIEND_WELCOME_SEND_TIMEOUT_MS: '1000'
@@ -113,6 +152,7 @@ test('sendFriendWelcomeMessage sends the configured GET request', async () => {
     assert.equal(captured.url.pathname, '/sendWxIdMesage');
     assert.equal(captured.url.searchParams.get('sendId'), 'new-user-wxid');
     assert.equal(captured.url.searchParams.get('recvId'), 'service-wxid');
+    assert.equal(captured.url.searchParams.get('tenantId'), '125');
     assert.equal(captured.url.searchParams.get('content'), '欢迎添加雪创客服\nhttps://example.test/welcome');
     assert.equal(captured.headers.mcpkey, 'key-1');
     assert.equal(captured.headers.mcpsecret, 'secret-1');
@@ -138,12 +178,17 @@ test('handleFriendWelcomePayload handles friend approval without returning reply
         status: '1',
         sendId: 'new-user-wxid',
         recvId: 'service-wxid',
-        conversationId: 'conv-001'
+        conversationId: 'conv-001',
+        tenantId: '125'
       },
       {
         FRIEND_WELCOME_SEND_URL: `http://127.0.0.1:${port}/sendWxIdMesage`,
-        FRIEND_WELCOME_MCP_KEY: 'key-1',
-        FRIEND_WELCOME_MCP_SECRET: 'secret-1',
+        FRIEND_WELCOME_TENANT_CREDENTIALS: JSON.stringify({
+          125: {
+            mcpKey: 'key-1',
+            mcpSecret: 'secret-1'
+          }
+        }),
         FRIEND_WELCOME_TEXT: '欢迎添加雪创客服',
         FRIEND_WELCOME_LINK: 'https://example.test/welcome',
         FRIEND_WELCOME_SEND_TIMEOUT_MS: '1000'
@@ -153,6 +198,7 @@ test('handleFriendWelcomePayload handles friend approval without returning reply
     assert.deepEqual(result, { handled: true, statusCode: 204 });
     assert.equal(captured.searchParams.get('sendId'), 'new-user-wxid');
     assert.equal(captured.searchParams.get('recvId'), 'service-wxid');
+    assert.equal(captured.searchParams.get('tenantId'), '125');
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
