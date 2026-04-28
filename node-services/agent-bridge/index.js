@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { runAgentPoolBridge } = require('./agent-pool-client');
 const { handleFriendWelcomePayload } = require('./friend-welcome');
 
 const app = express();
@@ -12,6 +13,8 @@ app.use(express.json({ limit: '256kb' }));
 const PORT = Number(process.env.PORT || 9070);
 const BRIDGE_TOKEN = String(process.env.AGENT_BRIDGE_TOKEN || '').trim();
 const OPENCLAW_BIN = String(process.env.OPENCLAW_BIN || 'openclaw').trim();
+const AGENT_POOL_BRIDGE_URL = String(process.env.AGENT_POOL_BRIDGE_URL || '').trim();
+const AGENT_POOL_BRIDGE_TOKEN = String(process.env.AGENT_POOL_BRIDGE_TOKEN || '').trim();
 const DEFAULT_AGENT_ID = String(process.env.DEFAULT_AGENT_ID || 'snowchuang').trim();
 const AGENT_TIMEOUT_SECONDS = Number(process.env.AGENT_TIMEOUT_SECONDS || 120);
 const KNOWLEDGE_FILE = String(process.env.KNOWLEDGE_FILE || '客服回复优化.txt').trim();
@@ -613,13 +616,24 @@ async function handleChat(req, res, agentId) {
   const runSessionId = buildRunSessionId(agentId, traceId);
 
   try {
-    const result = await runOpenClawAgent({
-      agentId,
-      sessionId: runSessionId,
-      message,
-      messageList,
-      traceId
-    });
+    const result = AGENT_POOL_BRIDGE_URL
+      ? await runAgentPoolBridge({
+        baseUrl: AGENT_POOL_BRIDGE_URL,
+        token: AGENT_POOL_BRIDGE_TOKEN,
+        agentId,
+        conversationId,
+        userId,
+        message: composeAgentMessage(message, messageList),
+        messageList,
+        timeoutMs: Math.max(AGENT_TIMEOUT_SECONDS, 1) * 1000 + 1000
+      })
+      : await runOpenClawAgent({
+        agentId,
+        sessionId: runSessionId,
+        message,
+        messageList,
+        traceId
+      });
     appendSessionTurn(agentId, conversationId, message, result.reply);
 
     return res.json({
@@ -645,6 +659,8 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     default_agent_id: DEFAULT_AGENT_ID,
+    agent_execution_backend: AGENT_POOL_BRIDGE_URL ? 'agent-pool' : 'openclaw',
+    agent_pool_bridge_url: AGENT_POOL_BRIDGE_URL,
     openclaw_bin: OPENCLAW_BIN,
     knowledge_file: knowledgeFilePath,
     knowledge_entries: knowledgeEntries.length,

@@ -10,7 +10,7 @@ Current MVP:
 - bearer auth via `AGENT_BRIDGE_TOKEN`
 - maps each `agentId + conversationId` to isolated bridge-owned history
 - supports lightweight local retrieval from `客服回复优化.txt` before calling the agent
-- calls OpenClaw with a per-request run session to avoid cross-user internal context bleed
+- calls OpenClaw with a per-request run session by default, or routes execution through `AGENT_POOL_BRIDGE_URL` when configured
 
 Example request:
 
@@ -77,6 +77,12 @@ Local knowledge base:
 - default file: `客服回复优化.txt`
 - parsed as FAQ entries at service startup
 - top matches are injected as hidden context for the current turn
+
+Agent pool backend:
+
+- Set `AGENT_POOL_BRIDGE_URL=http://127.0.0.1:9071` to keep this Snowchuang bridge as the public business adapter while sending actual agent execution through the generic worker pool.
+- Set `AGENT_POOL_BRIDGE_TOKEN` to the token configured on the pool bridge.
+- Friend approval welcome events still short-circuit locally and do not call the pool.
 
 Session isolation:
 
