@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const { runAgentPoolBridge } = require('./agent-pool-client');
 const { handleFriendWelcomePayload } = require('./friend-welcome');
 const { lookupOrderingUserById } = require('./ordering-user-lookup');
+const { runPaymentReminderFromPayload } = require('./payment-reminder');
 const { runWxidBindingFromPayload } = require('./wxid-binding');
 
 const app = express();
@@ -28,6 +29,13 @@ const WXID_BINDING_ENABLED = !['0', 'false', 'off', 'no'].includes(
   String(process.env.WXID_BINDING_ENABLED || '1').trim().toLowerCase()
 );
 const WXID_BINDING_STORE_FILE = String(process.env.WXID_BINDING_STORE_FILE || '').trim();
+const PAYMENT_REMINDER_ENABLED = !['0', 'false', 'off', 'no'].includes(
+  String(process.env.PAYMENT_REMINDER_ENABLED || '1').trim().toLowerCase()
+);
+const PAYMENT_REMINDER_SEND_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.PAYMENT_REMINDER_SEND_ENABLED || '').trim().toLowerCase()
+);
+const PAYMENT_REMINDER_STORE_FILE = String(process.env.PAYMENT_REMINDER_STORE_FILE || '').trim();
 
 function buildTraceId() {
   return crypto.randomUUID();
@@ -212,6 +220,7 @@ const knowledgeFilePath = resolveKnowledgeFilePath(KNOWLEDGE_FILE);
 const knowledgeEntries = loadKnowledgeEntries(KNOWLEDGE_FILE);
 const sessionStoreDir = resolveSessionStoreDir(SESSION_STORE_DIR);
 const wxidBindingStoreFile = resolveOptionalFilePath(WXID_BINDING_STORE_FILE);
+const paymentReminderStoreFile = resolveOptionalFilePath(PAYMENT_REMINDER_STORE_FILE);
 
 function buildKnowledgeContext(message) {
   if (!knowledgeEntries.length) return '';
@@ -627,6 +636,15 @@ async function handleChat(req, res, agentId) {
     });
   }
 
+  if (PAYMENT_REMINDER_ENABLED) {
+    await runPaymentReminderFromPayload(req.body || {}, {
+      bindingStoreFile: wxidBindingStoreFile || undefined,
+      reminderStoreFile: paymentReminderStoreFile || undefined,
+      lookupUserById: (orderUserId, candidate) => lookupOrderingUserById(orderUserId, candidate),
+      logger: console
+    });
+  }
+
   const conversationId = normalizedBody.conversationId;
   const userId = normalizedBody.userId;
   const message = normalizedBody.message;
@@ -676,6 +694,33 @@ async function handleChat(req, res, agentId) {
   }
 }
 
+async function handlePaymentReminder(req, res) {
+  if (!requireAuth(req, res)) return;
+
+  const traceId = buildTraceId();
+  if (!PAYMENT_REMINDER_ENABLED) {
+    return res.json({
+      ok: true,
+      reminded: false,
+      reason: 'payment_reminder_disabled',
+      trace_id: traceId
+    });
+  }
+
+  const result = await runPaymentReminderFromPayload(req.body || {}, {
+    bindingStoreFile: wxidBindingStoreFile || undefined,
+    reminderStoreFile: paymentReminderStoreFile || undefined,
+    lookupUserById: (orderUserId, candidate) => lookupOrderingUserById(orderUserId, candidate),
+    logger: console
+  });
+
+  return res.json({
+    ok: true,
+    ...result,
+    trace_id: traceId
+  });
+}
+
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
@@ -688,7 +733,10 @@ app.get('/health', (_req, res) => {
     session_store_dir: sessionStoreDir,
     session_history_limit: SESSION_HISTORY_LIMIT,
     wxid_binding_enabled: WXID_BINDING_ENABLED,
-    wxid_binding_store_file: wxidBindingStoreFile || path.join(__dirname, '.sessions', 'wxid-bindings.json')
+    wxid_binding_store_file: wxidBindingStoreFile || path.join(__dirname, '.sessions', 'wxid-bindings.json'),
+    payment_reminder_enabled: PAYMENT_REMINDER_ENABLED,
+    payment_reminder_send_enabled: PAYMENT_REMINDER_SEND_ENABLED,
+    payment_reminder_store_file: paymentReminderStoreFile || path.join(__dirname, '.sessions', 'payment-reminders.json')
   });
 });
 
@@ -696,9 +744,17 @@ app.post('/api/agents/chat', async (req, res) => {
   return handleChat(req, res, DEFAULT_AGENT_ID);
 });
 
+app.post('/api/agents/payment-reminders', async (req, res) => {
+  return handlePaymentReminder(req, res);
+});
+
 app.post('/api/agents/:agentId/chat', async (req, res) => {
   const agentId = normalizeSessionPart(req.params.agentId, 40);
   return handleChat(req, res, agentId);
+});
+
+app.post('/api/agents/:agentId/payment-reminders', async (req, res) => {
+  return handlePaymentReminder(req, res);
 });
 
 app.listen(PORT, () => {
