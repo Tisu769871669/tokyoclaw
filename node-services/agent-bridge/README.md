@@ -72,6 +72,8 @@ Endpoints:
 - `GET /health`
 - `POST /api/agents/:agentId/chat`
 - `POST /api/agents/chat` (uses `DEFAULT_AGENT_ID`)
+- `POST /api/agents/:agentId/payment-reminders`
+- `POST /api/agents/payment-reminders` (uses the same Snowchuang bridge config)
 
 Local knowledge base:
 
@@ -93,6 +95,36 @@ Wxid phone binding:
 - The bridge calls the local `xuechuang-ordering` helper with `user --user-id <id>`, extracts phone fields such as `mobile`, `phone`, `userMobile`, `loginMobile`, or `tel`, and stores the binding locally.
 - Default binding store: `.sessions/wxid-bindings.json`. Override with `WXID_BINDING_STORE_FILE`.
 - If the lookup fails or the user profile has no phone field, the chat request still proceeds normally.
+
+Payment reminders:
+
+- Enabled in dry-run mode by default. Set `PAYMENT_REMINDER_ENABLED=0` to disable all reminder processing.
+- Real WeChat sends require `PAYMENT_REMINDER_SEND_ENABLED=1`; keep it unset for dry-run verification.
+- A reminder is considered only when the payload includes a pending payment order, for example `order.status=5` and `order.payStatus=0`.
+- The reminder flow is: pending order -> `order.userId` -> wxid/phone binding -> `sendWxIdMesage` request.
+- The service uses the existing wxid binding store and records successful real sends in `.sessions/payment-reminders.json`.
+- Duplicate reminders for the same order are suppressed for `PAYMENT_REMINDER_COOLDOWN_HOURS`, default `24`.
+- The service wxid should come from request `recvId` or `PAYMENT_REMINDER_RECV_ID` when real sending is enabled.
+- Prefer the dedicated `POST /api/agents/snowchuang/payment-reminders` endpoint for order events that do not contain a chat message.
+
+Payment reminder dry-run example:
+
+```bash
+curl -X POST http://127.0.0.1:9070/api/agents/snowchuang/payment-reminders \
+  -H "Authorization: Bearer replace_me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "conversationId": "wxid_o8abc123",
+    "recvId": "service-wxid",
+    "order": {
+      "id": 90002,
+      "no": "ORDER-90002",
+      "userId": 23788,
+      "status": 5,
+      "payStatus": 0
+    }
+  }'
+```
 
 Session isolation:
 
