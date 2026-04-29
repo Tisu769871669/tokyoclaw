@@ -10,6 +10,7 @@ Current MVP:
 - bearer auth via `AGENT_BRIDGE_TOKEN`
 - maps each `agentId + conversationId` to isolated bridge-owned history
 - supports lightweight local retrieval from `客服回复优化.txt` before calling the agent
+- can bind a Snowchuang WeChat conversation to an ordering member phone when the request includes an order `userId`
 - calls OpenClaw with a per-request run session by default, or routes execution through `AGENT_POOL_BRIDGE_URL` when configured
 
 Example request:
@@ -83,6 +84,15 @@ Agent pool backend:
 - Set `AGENT_POOL_BRIDGE_URL=http://127.0.0.1:9071` to keep this Snowchuang bridge as the public business adapter while sending actual agent execution through the generic worker pool.
 - Set `AGENT_POOL_BRIDGE_TOKEN` to the token configured on the pool bridge.
 - Friend approval welcome events still short-circuit locally and do not call the pool.
+
+Wxid phone binding:
+
+- Enabled by default. Set `WXID_BINDING_ENABLED=0` to disable it.
+- When a normal chat payload includes `orderUserId`, `memberUserId`, `xcdhtUserId`, `order.userId`, or `orders[].userId`, the bridge treats that value as the Snowchuang ordering member `userId`.
+- The current wxid is taken from `wxid`, `wechatId`, `sendId`, or falls back to `conversationId`.
+- The bridge calls the local `xuechuang-ordering` helper with `user --user-id <id>`, extracts phone fields such as `mobile`, `phone`, `userMobile`, `loginMobile`, or `tel`, and stores the binding locally.
+- Default binding store: `.sessions/wxid-bindings.json`. Override with `WXID_BINDING_STORE_FILE`.
+- If the lookup fails or the user profile has no phone field, the chat request still proceeds normally.
 
 Session isolation:
 
