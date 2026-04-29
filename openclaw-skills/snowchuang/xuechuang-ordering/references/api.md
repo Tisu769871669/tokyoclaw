@@ -24,6 +24,7 @@ Query params:
 
 - `pageNo` integer, required
 - `pageSize` integer, required
+- `userId` long, optional helper lookup filter. If the API ignores this filter, the helper falls back to paginating `memberUserList` and matching response field `id`.
 
 Important response fields:
 
@@ -44,6 +45,7 @@ Important response fields:
 - `shopTenantId`: user mini-store tenant id
 - `identity`: user identity
 - `email`: email
+- `mobile`, `phone`, `userMobile`, `loginMobile`, `tel`: possible phone fields when present in the live response; not every response shape includes all of them
 - `businessLicense`: business license
 - `businessLicenseStatus`: business license review status
 - `referCode`: referral code

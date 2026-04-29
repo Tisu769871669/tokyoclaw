@@ -80,6 +80,52 @@ def print_json(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def extract_items(payload: object) -> list[object]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("list", "records", "rows", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return extract_items(payload.get("data"))
+
+
+def find_user_in_payload(payload: object, user_id: int) -> object | None:
+    target = str(user_id)
+    for item in extract_items(payload):
+        if isinstance(item, dict) and str(item.get("id")) == target:
+            return item
+    return None
+
+
+def lookup_user_by_id(user_id: int, page_size: int, max_pages: int, timeout: float, base_url: str) -> object | None:
+    filtered = request_json(
+        "memberUserList",
+        {"pageNo": 1, "pageSize": page_size, "userId": user_id},
+        timeout,
+        base_url,
+    )
+    user = find_user_in_payload(filtered, user_id)
+    if user is not None:
+        return user
+
+    for page_no in range(1, max_pages + 1):
+        payload = request_json(
+            "memberUserList",
+            {"pageNo": page_no, "pageSize": page_size},
+            timeout,
+            base_url,
+        )
+        user = find_user_in_payload(payload, user_id)
+        if user is not None:
+            return user
+        if len(extract_items(payload)) < page_size:
+            break
+    return None
+
+
 def add_page_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page-no", type=positive_int, default=1, help="pageNo query parameter")
     parser.add_argument("--page-size", type=positive_int, default=20, help="pageSize query parameter")
@@ -103,6 +149,11 @@ def main(argv: list[str] | None = None) -> int:
     add_page_args(orders)
     orders.add_argument("--user-id", required=True, type=positive_int, help="userId query parameter")
 
+    user = subparsers.add_parser("user", help="Find one member user by userId")
+    user.add_argument("--user-id", required=True, type=positive_int, help="member user id")
+    user.add_argument("--page-size", type=positive_int, default=100, help="pageSize used for lookup")
+    user.add_argument("--max-pages", type=positive_int, default=20, help="maximum member list pages to scan")
+
     args = parser.parse_args(argv)
 
     try:
@@ -120,6 +171,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.timeout,
                 args.base_url,
             )
+        elif args.command == "user":
+            payload = lookup_user_by_id(args.user_id, args.page_size, args.max_pages, args.timeout, args.base_url)
+            if payload is None:
+                print(f"error: user not found: {args.user_id}", file=sys.stderr)
+                return 1
         else:
             parser.error(f"unsupported command: {args.command}")
             return 2
