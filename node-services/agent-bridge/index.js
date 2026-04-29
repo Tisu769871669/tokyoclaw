@@ -6,6 +6,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { runAgentPoolBridge } = require('./agent-pool-client');
 const { handleFriendWelcomePayload } = require('./friend-welcome');
+const { lookupOrderingUserById } = require('./ordering-user-lookup');
+const { runWxidBindingFromPayload } = require('./wxid-binding');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -22,6 +24,10 @@ const KB_TOP_K = Number(process.env.KB_TOP_K || 3);
 const KB_MIN_SCORE = Number(process.env.KB_MIN_SCORE || 3);
 const SESSION_STORE_DIR = String(process.env.SESSION_STORE_DIR || '.sessions').trim();
 const SESSION_HISTORY_LIMIT = Number(process.env.SESSION_HISTORY_LIMIT || 20);
+const WXID_BINDING_ENABLED = !['0', 'false', 'off', 'no'].includes(
+  String(process.env.WXID_BINDING_ENABLED || '1').trim().toLowerCase()
+);
+const WXID_BINDING_STORE_FILE = String(process.env.WXID_BINDING_STORE_FILE || '').trim();
 
 function buildTraceId() {
   return crypto.randomUUID();
@@ -41,6 +47,12 @@ function resolveSessionStoreDir(dirPath) {
   if (!dirPath) return path.join(__dirname, '.sessions');
   if (path.isAbsolute(dirPath)) return dirPath;
   return path.join(__dirname, dirPath);
+}
+
+function resolveOptionalFilePath(filePath) {
+  if (!filePath) return '';
+  if (path.isAbsolute(filePath)) return filePath;
+  return path.join(__dirname, filePath);
 }
 
 function parseMaybeJson(value) {
@@ -199,6 +211,7 @@ function scoreKnowledgeEntry(query, entry) {
 const knowledgeFilePath = resolveKnowledgeFilePath(KNOWLEDGE_FILE);
 const knowledgeEntries = loadKnowledgeEntries(KNOWLEDGE_FILE);
 const sessionStoreDir = resolveSessionStoreDir(SESSION_STORE_DIR);
+const wxidBindingStoreFile = resolveOptionalFilePath(WXID_BINDING_STORE_FILE);
 
 function buildKnowledgeContext(message) {
   if (!knowledgeEntries.length) return '';
@@ -606,6 +619,14 @@ async function handleChat(req, res, agentId) {
     });
   }
 
+  if (WXID_BINDING_ENABLED) {
+    await runWxidBindingFromPayload(req.body || {}, {
+      storeFile: wxidBindingStoreFile || undefined,
+      lookupUserById: (orderUserId, candidate) => lookupOrderingUserById(orderUserId, candidate),
+      logger: console
+    });
+  }
+
   const conversationId = normalizedBody.conversationId;
   const userId = normalizedBody.userId;
   const message = normalizedBody.message;
@@ -665,7 +686,9 @@ app.get('/health', (_req, res) => {
     knowledge_file: knowledgeFilePath,
     knowledge_entries: knowledgeEntries.length,
     session_store_dir: sessionStoreDir,
-    session_history_limit: SESSION_HISTORY_LIMIT
+    session_history_limit: SESSION_HISTORY_LIMIT,
+    wxid_binding_enabled: WXID_BINDING_ENABLED,
+    wxid_binding_store_file: wxidBindingStoreFile || path.join(__dirname, '.sessions', 'wxid-bindings.json')
   });
 });
 
