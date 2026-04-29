@@ -1,6 +1,6 @@
 ---
 name: xuechuang-ordering
-description: Query Snowchuang Ordering API for member users and member order pages. Use for snowchuang, 雪创, 订货通, 会员用户, 用户列表, 客户订单, 订单列表, 订单状态, 收货地址, 支付金额, and questions that need live mall.xuechuang.biz MCP data.
+description: Query Snowchuang Ordering API for member users, member user lookup, and member order pages. Use for snowchuang, 雪创, 订货通, 会员用户, 用户列表, 客户订单, 订单列表, 订单状态, 收货地址, 支付金额, userId查用户, and questions that need live mall.xuechuang.biz MCP data.
 metadata: { "openclaw": { "emoji": "❄️", "primaryEnv": "XCDHT_MCP_SECRET", "requires": { "env": ["XCDHT_MCP_KEY", "XCDHT_MCP_SECRET"] } } }
 ---
 
@@ -21,6 +21,7 @@ Use the helper script first; it reads credentials from environment variables inj
 
 ```bash
 python3 "{baseDir}/scripts/xcdht_api.py" users --page-no 1 --page-size 20
+python3 "{baseDir}/scripts/xcdht_api.py" user --user-id 23788
 python3 "{baseDir}/scripts/xcdht_api.py" orders --user-id 23788 --page-no 1 --page-size 20
 ```
 
@@ -28,12 +29,13 @@ If the host only has `python`, use the same command with `python`.
 
 ## Workflow
 
-1. Identify whether the user is asking for members or orders.
+1. Identify whether the user is asking for members, one member profile, or orders.
 2. For member lookup/listing, call `users`. Use the returned `id` as `userId` for follow-up order queries.
-3. For order lookup/listing, call `orders --user-id <id>`.
-4. Read `references/api.md` when field meanings, status mapping, or endpoint details are needed.
-5. Convert money-like integer fields from cents/fen only when the field description says the unit is fen. Otherwise preserve the API value and avoid guessing.
-6. Answer in customer-service language: concise, task-focused, and without dumping full raw JSON unless explicitly requested by an authorized operator.
+3. When an order contains `userId` and you need the member profile or phone, call `user --user-id <id>`. Check fields such as `mobile`, `phone`, `userMobile`, `loginMobile`, or `tel` if present.
+4. For order lookup/listing, call `orders --user-id <id>`.
+5. Read `references/api.md` when field meanings, status mapping, or endpoint details are needed.
+6. Convert money-like integer fields from cents/fen only when the field description says the unit is fen. Otherwise preserve the API value and avoid guessing.
+7. Answer in customer-service language: concise, task-focused, and without dumping full raw JSON unless explicitly requested by an authorized operator.
 
 ## Configuration
 
